@@ -1076,17 +1076,32 @@ st.dataframe(df_share, use_container_width=True)
 if not any(r.get("Category") == "Total" for r in summary_rows):
     summary_rows.append({
         "Category": "Total",
-        "AP Count": combined_df.shape[0],
         "Site Count": combined_df["Site Code"].nunique() if not combined_df.empty else 0,
-        "Huawei": int((combined_df["Vendor"]=="Huawei").sum()) if not combined_df.empty else 0,
-        "Ruckus": int((combined_df["Vendor"]=="Ruckus").sum()) if not combined_df.empty else 0,
         "Wi‑Fi 4": int((combined_df["Wifi Technology (norm)"]=="Wi‑Fi 4").sum()) if not combined_df.size else 0,
         "Wi‑Fi 5": int((combined_df["Wifi Technology (norm)"]=="Wi‑Fi 5").sum()) if combined_df.size else 0,
         "Wi‑Fi 6": int((combined_df["Wifi Technology (norm)"]=="Wi‑Fi 6").sum()) if combined_df.size else 0,
-        "Wi‑Fi 7": int((combined_df["Wifi Technology (norm)"]=="Wi‑Fi 7").sum()) if combined_df.size else 0
+        "Wi‑Fi 7": int((combined_df["Wifi Technology (norm)"]=="Wi‑Fi 7").sum()) if combined_df.size else 0,
+        "Ruckus": int((combined_df["Vendor"]=="Ruckus").sum()) if not combined_df.empty else 0,
+        "Huawei": int((combined_df["Vendor"]=="Huawei").sum()) if not combined_df.empty else 0,
+        "AP Count": combined_df.shape[0]
     })
 
 summary_df = pd.DataFrame(summary_rows)
+
+COL_ORDER = [
+    "Category",
+    "Site Count",
+    "Wi‑Fi 4",
+    "Wi‑Fi 5",
+    "Wi‑Fi 6",
+    "Wi‑Fi 7",
+    "Ruckus",
+    "Huawei",
+    "AP Count"
+]
+
+summary_df = summary_df[[c for c in COL_ORDER if c in summary_df.columns]]
+
 st.markdown("### 📑 本月 - 各分類彙總（六類）")
 st.dataframe(summary_df, use_container_width=True)
 
@@ -1109,14 +1124,14 @@ for name in MANAGED_ORIGINAL_CATEGORIES:
 
     summary_rows_managed.append({
         "Category": MANAGED_GROUP_NAMES[name],
-        "AP Count": ap_count,
         "Site Count": site_count,
-        "Huawei": int(vendor_series.get("Huawei",0)),
-        "Ruckus": int(vendor_series.get("Ruckus",0)),
         "Wi‑Fi 4": int(wifi_series.get("Wi‑Fi 4",0)),
         "Wi‑Fi 5": int(wifi_series.get("Wi‑Fi 5",0)),
         "Wi‑Fi 6": int(wifi_series.get("Wi‑Fi 6",0)),
-        "Wi‑Fi 7": int(wifi_series.get("Wi‑Fi 7",0))
+        "Wi‑Fi 7": int(wifi_series.get("Wi‑Fi 7",0)),
+        "Ruckus": int(vendor_series.get("Ruckus",0)),
+        "Huawei": int(vendor_series.get("Huawei",0)),
+        "AP Count": ap_count
     })
 
 # 加上 Total 行（確保只加一次）
@@ -1134,26 +1149,29 @@ if not any(r.get("Category") == "Total" for r in summary_rows_managed):
     })
 
 summary_df_managed = pd.DataFrame(summary_rows_managed)
+
+COL_ORDER = [
+    "Category",
+    "Site Count",
+    "Wi‑Fi 4",
+    "Wi‑Fi 5",
+    "Wi‑Fi 6",
+    "Wi‑Fi 7",
+    "Ruckus",
+    "Huawei",
+    "AP Count"
+]
+
+summary_df_managed = summary_df_managed[
+    [c for c in COL_ORDER if c in summary_df_managed.columns]
+]
+
 st.dataframe(summary_df_managed, use_container_width=True)
 
 # -------------------------
 # 4) 最後顯示每分類的 expanders（使用預計算的 per_category_* 表格）
-# -------------------------
-st.subheader("📂 本月 - 各分類統計（六類）")
-for name in CATEGORY_ORDER:
-    ap_count = next((r["AP Count"] for r in summary_rows if r["Category"] == name), 0)
-    site_count = site_count_map.get(name, 0)
-
-    with st.expander(f"{name}（AP: {ap_count} / Site: {site_count}）", expanded=False):
-        a, b = st.columns(2)
-        with a:
-            st.write("**Wi‑Fi Technology**")
-            st.dataframe(per_category_wifi_tables.get(name, pd.DataFrame()), use_container_width=True)
-        with b:
-            st.write("**Vendor**")
-            st.dataframe(per_category_vendor_tables.get(name, pd.DataFrame()), use_container_width=True)
-
 # 占比圖（分類單行；Sites 放右側縱向；圖例右移到圖外避免重疊，legend.x=1.10）
+st.subheader("🧩 總 AP（六類）的 Wi‑Fi Technology 占比圖")
 df_pct = pd.DataFrame(pct_rows)
 if not df_pct.empty:
     # 取得每個分類的 Sites 數
@@ -1235,116 +1253,11 @@ if not df_pct.empty:
 
     st.plotly_chart(fig_stacked, use_container_width=True, config=PLOTLY_CONFIG)
 
-# =========================
-# =========================
-# =========================
-# 總 AP（六類）Wi‑Fi Technology：表 + 「全網 AP」餅圖（數量，整數百分比）
-# =========================
-st.markdown("### 🔹 本月總 AP（六類）的 Wi‑Fi Technology 統計")
+st.markdown("") 
 
-# 原本的統計邏輯
-total_wifi_tech = count_wifi_tech_series(combined_df)
-total_wifi_full = combined_df["Wifi Technology (norm)"].value_counts()
-total_wifi_df = series_to_df_for_chart(
-    total_wifi_tech,
-    "Wi‑Fi Technology",
-    "Count",
-    show_unknown,
-    total_wifi_full
-)
-
-# ✅ 新增：百分比（整數、四捨五入、字串格式 xx%）— 表格
-_total = int(total_wifi_df["Count"].sum())
-if _total > 0:
-    total_wifi_df["Percent"] = (
-        (total_wifi_df["Count"] / _total * 100)
-        .round(0)
-        .astype(int)
-        .astype(str)
-        + "%"
-    )
-else:
-    total_wifi_df["Percent"] = "0%"
-
-# （可選）整理欄位順序
-total_wifi_df = total_wifi_df[["Wi‑Fi Technology", "Count", "Percent"]]
-
-# 顯示表格
-st.dataframe(total_wifi_df, use_container_width=True)
-
-# === 新增：餅圖用整數百分比（合計=100） + 覆寫文字 ===
-_total_pie_df = compute_pie_integer_percent(total_wifi_df, value_col="Count", out_col="PercentInt")
-_wifi_pie_text = [f"{int(c)}，{int(p)}%" for c, p in zip(_total_pie_df["Count"], _total_pie_df["PercentInt"])]
-
-# 餅圖沿用 Count，不需修改
-fig_wifi_pie = make_square_pie_12cm_overall(
-    df=total_wifi_df,
-    names="Wi‑Fi Technology",
-    values="Count",
-    title_text="Total number of APs",
-    color_col="Wi‑Fi Technology",
-    color_discrete_map=COLOR_MAP,
-    show_value_and_percent=True,
-    text_values=_wifi_pie_text   # ← 使用預先分配好的整數百分比文字
-)
-center_l, center_c, center_r = st.columns([1, 2, 1])
-with center_c:
-    st.plotly_chart(fig_wifi_pie, use_container_width=False, config=PLOTLY_CONFIG)
-
-# =========================
-# 總 AP（六類）Vendor：表 + 「全網 AP」餅圖（僅整數百分比）
-# =========================
-st.markdown("### 🔹 本月總 AP（六類）的 Vendor 統計")
-total_vendor = combined_df["Vendor"].value_counts().reindex(["Huawei","Ruckus"], fill_value=0)
-total_vendor_df = total_vendor.rename_axis("Vendor").reset_index(name="Count")
-st.dataframe(total_vendor_df, use_container_width=True)
-
-# === 新增：餅圖用整數百分比（合計=100） + 覆寫文字（僅百分比） ===
-_total_vendor_pie_df = compute_pie_integer_percent(total_vendor_df, value_col="Count", out_col="PercentInt")
-_vendor_pie_text = [f"{int(p)}%" for p in _total_vendor_pie_df["PercentInt"]]
-
-fig_vendor_pie = make_square_pie_12cm_overall(
-    df=total_vendor_df,
-    names="Vendor",
-    values="Count",
-    title_text="Brand Distribution of APs",
-    color_col="Vendor",
-    color_discrete_map=COLOR_MAP,
-    show_value_and_percent=False,  # 僅整數百分比
-    text_values=_vendor_pie_text   # ← 使用預先分配好的整數百分比文字
-)
-center_l, center_c, center_r = st.columns([1, 2, 1])
-with center_c:
-    st.plotly_chart(fig_vendor_pie, use_container_width=False, config=PLOTLY_CONFIG)
-
-# =========================
-# 按 Wi‑Fi Technology 分的品牌分佈（表 + 堆疊條）
-# =========================
-st.subheader("📘 各 Wi‑Fi Technology 的品牌分佈（Huawei / Ruckus）")
-tech_vendor_rows = []
-for tech in WIFI_LEVELS_DISPLAY:
-    sub = combined_df[combined_df["Wifi Technology (norm)"] == tech]
-    if sub.empty: continue
-    vc = sub["Vendor"].value_counts().reindex(["Huawei","Ruckus"], fill_value=0)
-    tech_vendor_rows.append({"Wi‑Fi Technology":tech, "Huawei":int(vc["Huawei"]), "Ruckus":int(vc["Ruckus"]), "Total":int(vc.sum())})
-df_tech_vendor = pd.DataFrame(tech_vendor_rows)
-if df_tech_vendor.empty:
-    st.info("目前六類資料中沒有 Wi‑Fi 4/5/6/7 的 AP。")
-else:
-    st.dataframe(df_tech_vendor, use_container_width=True)
-    df_tv_plot = df_tech_vendor.melt(id_vars=["Wi‑Fi Technology","Total"], value_vars=["Huawei","Ruckus"],
-                                     var_name="Vendor", value_name="Count")
-    fig_tv = px.bar(df_tv_plot, x="Count", y="Wi‑Fi Technology", color="Vendor",
-                    orientation="h", barmode="stack", color_discrete_map=COLOR_MAP,
-                    title=None, text="Count")
-    fig_tv.update_traces(textposition="inside")
-    fig_tv = apply_clean_layout(fig_tv, "AP Vendor Breakdown within each Wi‑Fi Technology", remove_y_title=False, percent_axis=False)
-    st.plotly_chart(fig_tv, use_container_width=True, config=PLOTLY_CONFIG)
-
-# =========================
 # Managed Wi‑Fi（四類）— 圖表 + 統計表（右側 Sites + 圖例外推，legend.x=1.10）
 # =========================
-st.subheader("🧩 Managed Wi‑Fi（四類）統計")
+st.subheader("🧩 Managed Wi‑Fi（四類）的 Wi‑Fi Technology 占比圖")
 managed_df = df_curr6[df_curr6["Category"].isin(MANAGED_ORIGINAL_CATEGORIES)].copy()
 if managed_df.empty:
     st.info("目前六類資料中沒有 Managed/Mixed/Ferry/Limo 類別的 AP。")
@@ -1359,7 +1272,7 @@ else:
         .str.replace("—", "-", regex=False)
     )
     
-   # === Managed 與 CTM Hotspot 對全網 AP 的占比（百分比字串、四捨五入為整數） ===
+    # === Managed 與 CTM Hotspot 對全網 AP 的占比（百分比字串、四捨五入為整數） ===
     # 全網 AP（六類）
     total_ap_all = len(combined_df)  # 你前面已經組好的六類合併 df
 
@@ -1511,19 +1424,207 @@ else:
 
         st.plotly_chart(fig_mgd, use_container_width=True, config=PLOTLY_CONFIG)
 
-    # 2) Managed — 統計表
+
+st.markdown("") 
+st.markdown("") 
+# =========================
+# 總 AP（六類）Wi‑Fi Technology：表 + 「全網 AP」餅圖（數量，整數百分比）
+# =========================
+st.markdown("### 🔹 本月總 AP（六類）的 Wi‑Fi Technology 統計")
+
+# 原本的統計邏輯
+total_wifi_tech = count_wifi_tech_series(combined_df)
+total_wifi_full = combined_df["Wifi Technology (norm)"].value_counts()
+total_wifi_df = series_to_df_for_chart(
+    total_wifi_tech,
+    "Wi‑Fi Technology",
+    "Count",
+    show_unknown,
+    total_wifi_full
+)
+
+# ✅ 新增：百分比（整數、四捨五入、字串格式 xx%）— 表格
+_total = int(total_wifi_df["Count"].sum())
+if _total > 0:
+    total_wifi_df["Percent"] = (
+        (total_wifi_df["Count"] / _total * 100)
+        .round(0)
+        .astype(int)
+        .astype(str)
+        + "%"
+    )
+else:
+    total_wifi_df["Percent"] = "0%"
+
+# （可選）整理欄位順序
+total_wifi_df = total_wifi_df[["Wi‑Fi Technology", "Count", "Percent"]]
+
+# 顯示表格
+st.dataframe(total_wifi_df, use_container_width=True)
+
+# === 新增：餅圖用整數百分比（合計=100） + 覆寫文字 ===
+_total_pie_df = compute_pie_integer_percent(total_wifi_df, value_col="Count", out_col="PercentInt")
+_wifi_pie_text = [f"{int(c)}，{int(p)}%" for c, p in zip(_total_pie_df["Count"], _total_pie_df["PercentInt"])]
+
+# 餅圖沿用 Count，不需修改
+fig_wifi_pie = make_square_pie_12cm_overall(
+    df=total_wifi_df,
+    names="Wi‑Fi Technology",
+    values="Count",
+    title_text="Total number of APs",
+    color_col="Wi‑Fi Technology",
+    color_discrete_map=COLOR_MAP,
+    show_value_and_percent=True,
+    text_values=_wifi_pie_text   # ← 使用預先分配好的整數百分比文字
+)
+center_l, center_c, center_r = st.columns([1, 2, 1])
+with center_c:
+    st.plotly_chart(fig_wifi_pie, use_container_width=False, config=PLOTLY_CONFIG)
+
+# =========================
+# 總 AP（六類）Vendor：表 + 「全網 AP」餅圖（僅整數百分比）
+# =========================
+st.markdown("### 🔹 本月總 AP（六類）的 Vendor 統計")
+
+total_vendor = (
+    combined_df["Vendor"]
+    .value_counts()
+    .reindex(["Huawei", "Ruckus"], fill_value=0)
+)
+
+total_vendor_df = (
+    total_vendor
+    .rename_axis("Vendor")
+    .reset_index(name="Count")
+)
+
+# ✅ 計算百分比
+_total = int(total_vendor_df["Count"].sum())
+if _total > 0:
+    total_vendor_df["Percent"] = (
+        (total_vendor_df["Count"] / _total * 100)
+        .round(0)
+        .astype(int)
+        .astype(str)
+        + "%"
+    )
+else:
+    total_vendor_df["Percent"] = "0%"
+
+# 顯示表格
+st.dataframe(
+    total_vendor_df[["Vendor", "Count", "Percent"]],
+    use_container_width=True
+)
+
+# === 新增：餅圖用整數百分比（合計=100） + 覆寫文字（僅百分比） ===
+_total_vendor_pie_df = compute_pie_integer_percent(total_vendor_df, value_col="Count", out_col="PercentInt")
+_vendor_pie_text = [f"{int(p)}%" for p in _total_vendor_pie_df["PercentInt"]]
+
+fig_vendor_pie = make_square_pie_12cm_overall(
+    df=total_vendor_df,
+    names="Vendor",
+    values="Count",
+    title_text="Brand Distribution of APs",
+    color_col="Vendor",
+    color_discrete_map=COLOR_MAP,
+    show_value_and_percent=False,  # 僅整數百分比
+    text_values=_vendor_pie_text   # ← 使用預先分配好的整數百分比文字
+)
+center_l, center_c, center_r = st.columns([1, 2, 1])
+with center_c:
+    st.plotly_chart(fig_vendor_pie, use_container_width=False, config=PLOTLY_CONFIG)
+
+# =========================
+# 按 Wi‑Fi Technology 分的品牌分佈（表 + 堆疊條）
+# =========================
+st.subheader("📘 各 Wi‑Fi Technology 的品牌分佈（Huawei / Ruckus）")
+tech_vendor_rows = []
+for tech in WIFI_LEVELS_DISPLAY:
+    sub = combined_df[combined_df["Wifi Technology (norm)"] == tech]
+    if sub.empty: continue
+    vc = sub["Vendor"].value_counts().reindex(["Huawei","Ruckus"], fill_value=0)
+    tech_vendor_rows.append({"Wi‑Fi Technology":tech, "Huawei":int(vc["Huawei"]), "Ruckus":int(vc["Ruckus"]), "Total":int(vc.sum())})
+df_tech_vendor = pd.DataFrame(tech_vendor_rows)
+if df_tech_vendor.empty:
+    st.info("目前六類資料中沒有 Wi‑Fi 4/5/6/7 的 AP。")
+else:
+    st.dataframe(df_tech_vendor, use_container_width=True)
+    df_tv_plot = df_tech_vendor.melt(id_vars=["Wi‑Fi Technology","Total"], value_vars=["Huawei","Ruckus"],
+                                     var_name="Vendor", value_name="Count")
+    fig_tv = px.bar(df_tv_plot, x="Count", y="Wi‑Fi Technology", color="Vendor",
+                    orientation="h", barmode="stack", color_discrete_map=COLOR_MAP,
+                    title=None, text="Count")
+    fig_tv.update_traces(textposition="inside")
+    fig_tv = apply_clean_layout(fig_tv, "AP Vendor Breakdown within each Wi‑Fi Technology", remove_y_title=False, percent_axis=False)
+    st.plotly_chart(fig_tv, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+    st.markdown("") 
+    st.markdown("") 
+# =========================
+
+    # 1) Managed — 統計表
     st.markdown("### 📑 Managed Wi‑Fi 統計表")
+
     wifi_series_mgd = count_wifi_tech_series(managed_df)
-    df_wifi_mgd = wifi_series_mgd.rename_axis("Wi‑Fi Technology").reset_index(name="Count")
+    df_wifi_mgd = (
+        wifi_series_mgd
+        .rename_axis("Wi‑Fi Technology")
+        .reset_index(name="Count")
+    )
+
+    # ✅ 計算百分比
+    _wifi_total = int(df_wifi_mgd["Count"].sum())
+    if _wifi_total > 0:
+        df_wifi_mgd["Percent"] = (
+            (df_wifi_mgd["Count"] / _wifi_total * 100)
+            .round(0)
+            .astype(int)
+            .astype(str)
+            + "%"
+        )
+    else:
+        df_wifi_mgd["Percent"] = "0%"
+
     st.markdown("**Wi‑Fi Technology 統計**")
-    st.dataframe(df_wifi_mgd, use_container_width=True)
+    st.dataframe(
+        df_wifi_mgd[["Wi‑Fi Technology", "Count", "Percent"]],
+        use_container_width=True
+    )
 
-    vendor_series_mgd = managed_df["Vendor"].value_counts().reindex(["Huawei","Ruckus"], fill_value=0)
-    df_vendor_mgd = vendor_series_mgd.rename_axis("Vendor").reset_index(name="Count")
+    vendor_series_mgd = (
+        managed_df["Vendor"]
+        .value_counts()
+        .reindex(["Huawei", "Ruckus"], fill_value=0)
+    )
+
+    df_vendor_mgd = (
+        vendor_series_mgd
+        .rename_axis("Vendor")
+        .reset_index(name="Count")
+    )
+
+    # ✅ 計算百分比
+    _vendor_total = int(df_vendor_mgd["Count"].sum())
+    if _vendor_total > 0:
+        df_vendor_mgd["Percent"] = (
+            (df_vendor_mgd["Count"] / _vendor_total * 100)
+            .round(0)
+            .astype(int)
+            .astype(str)
+            + "%"
+        )
+    else:
+        df_vendor_mgd["Percent"] = "0%"
+
     st.markdown("**Vendor 統計**")
-    st.dataframe(df_vendor_mgd, use_container_width=True)
-
-    # 3) Managed — 餅圖（數量，整數百分比）
+    st.dataframe(
+        df_vendor_mgd[["Vendor", "Count", "Percent"]],
+        use_container_width=True
+    )
+    
+    # 2) Managed — Wi‑Fi Technology 餅圖（數量，整數百分比）
     # === 新增：餅圖用整數百分比（合計=100） + 覆寫文字 ===
     _mgd_pie_df = compute_pie_integer_percent(df_wifi_mgd, value_col="Count", out_col="PercentInt")
     _mgd_wifi_text = [f"{int(c)}，{int(p)}%" for c, p in zip(_mgd_pie_df["Count"], _mgd_pie_df["PercentInt"])]
@@ -1542,7 +1643,7 @@ else:
     with center_c:
         st.plotly_chart(fig_mgd_pie, use_container_width=False, config=PLOTLY_CONFIG)
 
-    # 4) Managed — Vendor 餅圖（僅整數百分比）
+    # 3) Managed — Vendor 餅圖（僅整數百分比）
     # === 新增：餅圖用整數百分比（合計=100） + 覆寫文字（僅百分比） ===
     _mgd_vendor_pie_df = compute_pie_integer_percent(df_vendor_mgd, value_col="Count", out_col="PercentInt")
     _mgd_vendor_text = [f"{int(p)}%" for p in _mgd_vendor_pie_df["PercentInt"]]
