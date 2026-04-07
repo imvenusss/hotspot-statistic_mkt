@@ -1062,12 +1062,6 @@ with col3:
         f"{total_ap_all:,} AP"
     )
 
-share_rows = [
-    {"組別": "Managed Wi‑Fi（四類）", "AP 數": managed_ap, "占全網比例": managed_pct_str},
-    {"組別": "CTM Hotspot（CTM WiFi + Bus WiFi）", "AP 數": ctm_hotspot_ap, "占全網比例": ctm_pct_str},
-]
-df_share = pd.DataFrame(share_rows)
-st.dataframe(df_share, use_container_width=True)
 
 # -------------------------
 # 2) 本月 - 各分類彙總（六類） 顯示（使用預計算的 summary_rows）
@@ -1481,6 +1475,18 @@ center_l, center_c, center_r = st.columns([1, 2, 1])
 with center_c:
     st.plotly_chart(fig_wifi_pie, use_container_width=False, config=PLOTLY_CONFIG)
 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
+st.markdown("") 
 # =========================
 # 總 AP（六類）Vendor：表 + 「全網 AP」餅圖（僅整數百分比）
 # =========================
@@ -1797,12 +1803,19 @@ if uploaded_prev is not None:
                 st.markdown("### ➖ 移除站點（六類；上月有、本月無）")
                 st.dataframe(removed_sites_df, use_container_width=True)
                 st.markdown(f"- 移除站點 **AP 總減量（六類）**：{int(removed_sites_df['上月 AP 數（六類）'].sum())}")
+                st.markdown("") 
+                st.markdown("") 
+                st.markdown("") 
+                st.markdown("") 
+                st.markdown("") 
+                st.markdown("")      
 
+                
                 st.markdown("### 🔁 AP 變動站點（六類；兩月皆存在，但 AP 數不同）")
                 st.dataframe(changed_sites_df, use_container_width=True)
                 if not changed_sites_df.empty:
                     st.markdown(f"- **ΔAP 合計（六類）**：{int(changed_sites_df['Δ AP'].sum())}（同一 Site 的 AP 增減合計）")
-
+                
                 if not moved_sites_df.empty:
                     st.markdown("### 🔄 類型變更站點（六類）")
                     st.dataframe(moved_sites_df, use_container_width=True)
