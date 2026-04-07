@@ -930,7 +930,7 @@ try:
     st.markdown(html_table, unsafe_allow_html=True)
 
     # 下載：以 DataFrame（Prev 在前）匯出
-    export_df = hotspot_stat_df.copy()[["Category","Prev","Curr","vs"]]
+    export_df = hotspot_stat_df.copy()[["Section","Category","Prev","Curr","vs"]]
     export_df = export_df.rename(columns={"Prev": month_prev_label, "Curr": month_curr_label, "vs":"vs Previous Month"})
     csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("下載 Hotspot Statistic CSV", csv_bytes, file_name="hotspot_statistic.csv", mime="text/csv")
