@@ -638,6 +638,52 @@ else:
             st.warning(f"上月資料準備失敗：{e}")
             df_prev6 = pd.DataFrame(columns=df_curr6.columns)
 
+# =========================
+# Site-level category（唯一口徑，給整個 dashboard 共用）
+# =========================
+cat_curr_by_site = site_category_majority(df_curr6)
+cat_prev_by_site = site_category_majority(df_prev6)
+
+# =========================
+# ✅ AP 跟隨 Site-majority 的統一分類
+# =========================
+df_curr6_sm = df_curr6.copy()
+df_curr6_sm["Category_site_majority"] = (
+    df_curr6_sm["Site Code"].map(cat_curr_by_site)
+)
+
+# =========================
+# ✅ 統一 Site / AP 計算層（唯一權威來源）
+# =========================
+
+def build_site_ap_views(df6: pd.DataFrame, site_cat_map: dict):
+    """
+    回傳兩個 Series：
+    - site_count_by_cat : 每個 Category 的 Site 數（Site-majority）
+    - ap_count_by_cat   : 每個 Category 的 AP 數（AP 跟隨 Site-majority）
+    """
+    # Site count
+    site_count_by_cat = (
+        pd.Series(site_cat_map)
+        .value_counts()
+        .reindex(CATEGORY_ORDER, fill_value=0)
+    )
+
+    # AP count（AP 跟著 Site 走）
+    ap_count_by_cat = (
+        df6["Site Code"]
+        .map(site_cat_map)
+        .value_counts()
+        .reindex(CATEGORY_ORDER, fill_value=0)
+    )
+
+    return site_count_by_cat, ap_count_by_cat
+
+
+# ✅ 本月 / 上月 統一視圖（之後只用這個）
+site_curr_view, ap_curr_view = build_site_ap_views(df_curr6, cat_curr_by_site)
+site_prev_view, ap_prev_view = build_site_ap_views(df_prev6, cat_prev_by_site)
+
 # === 新增：本月資料質檢（逐列定位可疑資料） + 異常列輸出 ===
 def _collect_row_errors_current(df_all: pd.DataFrame, original_df: pd.DataFrame, colmap: dict) -> pd.DataFrame:
     errs = []
@@ -787,14 +833,36 @@ try:
     ceased_ap_total = int(prev_site_ap.loc[list(ceased_sites)].sum()) if ceased_sites else 0
     ceased_ap_total += int((-ap_diff_common[ap_diff_common < 0]).sum())
 
-    site_curr = df_curr6.groupby("Category")["Site Code"].nunique().reindex(CATEGORY_ORDER, fill_value=0)
+
+    site_curr = (
+        pd.Series(cat_curr_by_site)
+        .value_counts()
+        .reindex(CATEGORY_ORDER, fill_value=0)
+    )
+    
     site_prev = (
-        df_prev6.groupby("Category")["Site Code"].nunique().reindex(CATEGORY_ORDER, fill_value=0)
+        pd.Series(cat_prev_by_site)
+        .value_counts()
+        .reindex(CATEGORY_ORDER, fill_value=0)
         if prev_available else site_curr * 0
     )
-    ap_curr = df_curr6.groupby("Category").size().reindex(CATEGORY_ORDER, fill_value=0)
+
+    # ✅ AP 計算也改為 Site-majority 口徑
+    # ──────────────────────────────
+    ap_curr = (
+        df_curr6
+        .assign(_site_cat=lambda x: x["Site Code"].map(cat_curr_by_site))
+        .groupby("_site_cat")
+        .size()
+        .reindex(CATEGORY_ORDER, fill_value=0)
+    )
+
     ap_prev = (
-        df_prev6.groupby("Category").size().reindex(CATEGORY_ORDER, fill_value=0)
+        df_prev6
+        .assign(_site_cat=lambda x: x["Site Code"].map(cat_prev_by_site))
+        .groupby("_site_cat")
+        .size()
+        .reindex(CATEGORY_ORDER, fill_value=0)
         if prev_available else ap_curr * 0
     )
 
@@ -989,13 +1057,32 @@ pct_rows = []
 site_count_map = {}
 
 for name in CATEGORY_ORDER:
-    sub_df = category_dfs_curr.get(name, pd.DataFrame(columns=df_curr6.columns))
-    ap_count = len(sub_df)
-    site_count = sub_df['Site Code'].nunique() if not sub_df.empty else 0
+    sub_df = df_curr6_sm[
+        df_curr6_sm["Category_site_majority"] == name
+    ]
+
+
+    # ✅【關鍵修改 1】Site 數：使用 Site-majority 統一口徑
+    site_count = int(site_curr_view.get(name, 0))
     site_count_map[name] = site_count
 
-    wifi_series = count_wifi_tech_series(sub_df) if not sub_df.empty else pd.Series(0, index=WIFI_LEVELS_DISPLAY)
-    vendor_series = sub_df["Vendor"].value_counts().reindex(["Huawei","Ruckus"], fill_value=0) if not sub_df.empty else pd.Series([0,0], index=["Huawei","Ruckus"])
+    # ✅【關鍵修改 2】AP 數：AP 跟著 Site-majority 走
+    ap_count = int(ap_curr_view.get(name, 0))
+
+    # ✅ 下面這些都不用改（仍然用 sub_df 做技術分佈）
+    wifi_series = (
+        count_wifi_tech_series(sub_df)
+        if not sub_df.empty
+        else pd.Series(0, index=WIFI_LEVELS_DISPLAY)
+    )
+
+    vendor_series = (
+        sub_df["Vendor"]
+        .value_counts()
+        .reindex(["Huawei","Ruckus"], fill_value=0)
+        if not sub_df.empty
+        else pd.Series([0, 0], index=["Huawei","Ruckus"])
+    )
 
     # 準備顯示用表格
     wifi_full = sub_df["Wifi Technology (norm)"].value_counts() if not sub_df.empty else pd.Series(dtype=int)
@@ -1120,12 +1207,31 @@ combined_managed_df = pd.concat(vals_man, ignore_index=True) if vals_man else pd
 
 summary_rows_managed = []
 for name in MANAGED_ORIGINAL_CATEGORIES:
-    sub_df = managed_dfs_curr.get(name, pd.DataFrame(columns=df_curr6.columns))
-    ap_count = len(sub_df)
-    site_count = sub_df['Site Code'].nunique() if not sub_df.empty else 0
-    wifi_series = count_wifi_tech_series(sub_df) if not sub_df.empty else pd.Series(0, index=WIFI_LEVELS_DISPLAY)
-    vendor_series = sub_df["Vendor"].value_counts().reindex(["Huawei","Ruckus"], fill_value=0) if not sub_df.empty else pd.Series([0,0], index=["Huawei","Ruckus"])
+    sub_df = df_curr6_sm[
+        df_curr6_sm["Category_site_majority"] == name
+    ]
 
+    # ✅【關鍵修改 1】Site 數：Site‑majority（與 Hotspot Statistic 一致）
+    site_count = int(site_curr_view.get(name, 0))
+
+    # ✅【關鍵修改 2】AP 數：AP 跟著 Site‑majority
+    ap_count = int(ap_curr_view.get(name, 0))
+
+    # ✅【完全不用改】技術 / 品牌分析仍然使用 sub_df
+    wifi_series = (
+        count_wifi_tech_series(sub_df)
+        if not sub_df.empty
+        else pd.Series(0, index=WIFI_LEVELS_DISPLAY)
+    )
+
+    vendor_series = (
+        sub_df["Vendor"]
+        .value_counts()
+        .reindex(["Huawei","Ruckus"], fill_value=0)
+        if not sub_df.empty
+        else pd.Series([0, 0], index=["Huawei","Ruckus"])
+    )
+    
     summary_rows_managed.append({
         "Category": MANAGED_GROUP_NAMES[name],
         "Site Count": site_count,
@@ -1785,27 +1891,80 @@ if uploaded_prev is not None:
                     df_sites["Hotspot Name (Chinese)（本月）"] = df_sites["Site Code"].map(lambda s: name_curr_by_site.get(s,"-"))
                     return df_sites
 
-                percat_added, percat_removed, percat_changed = {}, {}, {}
+                # =========================
+                # per-category 差異分析（最終乾淨版）
+                # =========================
+
+                percat_added   = {}  # 新增站點（上月無）
+                percat_removed = {}  # 移除站點（本月無）
+                percat_apchg   = {}  # AP 數變動站點
+                percat_moved   = {}  # 類型變更站點（✴ 不看 AP 是否變）
+
                 for cat in CATEGORY_ORDER:
-                    sites_curr_cat = {s for s in sites_curr if cat_curr_by_site.get(s)==cat}
-                    sites_prev_cat = {s for s in sites_prev if cat_prev_by_site.get(s)==cat}
-                    added_cat = sorted(list(sites_curr_cat - sites_prev))
+                    # 本月 / 上月此分類的站點集合
+                    sites_curr_cat = {s for s in sites_curr if cat_curr_by_site.get(s) == cat}
+                    sites_prev_cat = {s for s in sites_prev if cat_prev_by_site.get(s) == cat}
+
+                    # 1️⃣ 新增 / 移除（只看 Site Code 是否存在）
+                    added_cat   = sorted(list(sites_curr_cat - sites_prev))
                     removed_cat = sorted(list(sites_prev_cat - sites_curr))
-                    changed_cat = sorted([s for s in (sites_curr_cat & sites_prev) if int(ap_curr_by_site.get(s,0)) != int(ap_prev_by_site.get(s,0))])
-                    percat_added[cat], percat_removed[cat], percat_changed[cat] = added_cat, removed_cat, changed_cat
 
-                    with st.expander(f"{cat}：新增 {len(added_cat)} / 移除 {len(removed_cat)} / AP變動 {len(changed_cat)}（六類）", expanded=False):
-                        A,B,C = st.columns(3)
+                    # 2️⃣ AP 變動（Site 存在於兩月，且 AP 數不同）
+                    ap_changed_cat = sorted([
+                        s for s in (sites_curr_cat & sites_prev)
+                        if int(ap_curr_by_site.get(s, 0)) != int(ap_prev_by_site.get(s, 0))
+                    ])
+
+                    # 3️⃣ 類型變更（✴ Site 存在於兩月，分類不同，不看 AP）
+                    moved_cat = sorted([
+                        s for s in (sites_curr & sites_prev)
+                        if cat_curr_by_site.get(s) == cat
+                        and cat_prev_by_site.get(s) != cat
+                    ])
+
+                    # 儲存結果
+                    percat_added[cat]   = added_cat
+                    percat_removed[cat] = removed_cat
+                    percat_apchg[cat]   = ap_changed_cat
+                    percat_moved[cat]   = moved_cat
+
+                    # =========================
+                    # UI 顯示（Expander）
+                    # =========================
+                    with st.expander(
+                        f"{cat}：新增 {len(added_cat)} / 移除 {len(removed_cat)} / "
+                        f"AP變動 {len(ap_changed_cat)} / 類型變更 {len(moved_cat)}（六類）",
+                        expanded=False
+                    ):
+                        A, B, C, D = st.columns(4)
+
                         with A:
-                            st.write("**新增站點（含 ΔAP）**")
-                            st.dataframe(attach_delta(pd.DataFrame({"Site Code": added_cat})), use_container_width=True)
-                        with B:
-                            st.write("**移除站點（含 ΔAP）**")
-                            st.dataframe(attach_delta(pd.DataFrame({"Site Code": removed_cat})), use_container_width=True)
-                        with C:
-                            st.write("**AP 變動站點（含 ΔP）**")
-                            st.dataframe(attach_delta(pd.DataFrame({"Site Code": changed_cat})), use_container_width=True)
+                            st.write("**新增站點（上月無）**")
+                            st.dataframe(
+                                attach_delta(pd.DataFrame({"Site Code": added_cat})),
+                                use_container_width=True
+                            )
 
+                        with B:
+                            st.write("**移除站點（本月無）**")
+                            st.dataframe(
+                                attach_delta(pd.DataFrame({"Site Code": removed_cat})),
+                                use_container_width=True
+                            )
+
+                        with C:
+                            st.write("**AP 變動站點**")
+                            st.dataframe(
+                                attach_delta(pd.DataFrame({"Site Code": ap_changed_cat})),
+                                use_container_width=True
+                            )
+
+                        with D:
+                            st.write("**類型變更站點（分類調整）**")
+                            st.dataframe(
+                                attach_delta(pd.DataFrame({"Site Code": moved_cat})),
+                                use_container_width=True
+                            )
                 st.markdown("### ➕ 新增站點（六類；本月有、上月無）")
                 st.dataframe(added_sites_df, use_container_width=True)
                 st.markdown(f"- 新增站點 **AP 總增量（六類）**：{int(added_sites_df['本月 AP 數（六類）'].sum())}")
@@ -1826,9 +1985,10 @@ if uploaded_prev is not None:
                 if not changed_sites_df.empty:
                     st.markdown(f"- **ΔAP 合計（六類）**：{int(changed_sites_df['Δ AP'].sum())}（同一 Site 的 AP 增減合計）")
                 
-                if not moved_sites_df.empty:
+                if moved_sites:
                     st.markdown("### 🔄 類型變更站點（六類）")
                     st.dataframe(moved_sites_df, use_container_width=True)
+
 
                 st.subheader("⬇️ 差異結果下載（只含六類）")
                 excel_bio = io.BytesIO()
