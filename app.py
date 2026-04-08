@@ -13,12 +13,6 @@ import streamlit as st
 # =========================
 st.set_page_config(page_title="WiFi AP 統計面板", layout="wide")
 st.title("📶 WiFi AP 統計面板")
-st.caption(
-    "上傳本月 / 上月資料，所有總數與差異統計只採計六類（CTM/Managed/Mixed/Bus/Ferry/Limo）。\n\n"
-    "本版本已支援『欄位名稱模糊識別』（忽略大小寫、空白、底線、各式連字號與非英數字元），例如："
-    "`Wi-Fi Technology`、`WiFi Technology`、`wifi technology`、`Wi‑Fi-Technology` 皆可自動對應。\n"
-    "新增支援輸入與輸出 **Hotspot Name (Chinese)**：在差異與明細中會同時列出 Site Code 與對應中文名稱（上月/本月）。"
-)
 
 # =========================
 # 常數與分類規則
@@ -721,240 +715,256 @@ except Exception as _e:
 
 
 # -------------------------
-# Hotspot Statistic（放在本月六類合併統計之前）
+# -------------------------
+# Hotspot Statistic
 # -------------------------
 st.markdown("## 🔎 Hotspot Statistic")
 
-# 使用者手動輸入月份顯示文字（可改為 selectbox）
+# ===== 月份顯示文字 =====
 col_m1, col_m2 = st.columns(2)
 with col_m1:
     month_curr_input = st.text_input("本月（顯示文字，例如：二月-26）", value="")
 with col_m2:
     month_prev_input = st.text_input("上月（顯示文字，例如：一月-26）", value="")
 
-# 確保 df_curr6 / df_prev6 的 Site Code 為字串且去空白（避免比較錯誤）
-if 'df_curr6' in globals() and isinstance(df_curr6, pd.DataFrame):
-    df_curr6["Site Code"] = df_curr6["Site Code"].astype(str).str.strip()
-if 'df_prev6' in globals() and isinstance(df_prev6, pd.DataFrame):
-    df_prev6["Site Code"] = df_prev6["Site Code"].astype(str).str.strip()
+month_prev_label = month_prev_input or "Previous"
+month_curr_label = month_curr_input or "Current"
 
-prev_available = 'df_prev6' in globals() and isinstance(df_prev6, pd.DataFrame) and not df_prev6.empty
+# ===== 上月是否存在 =====
+prev_available = (
+    "df_prev6" in globals()
+    and isinstance(df_prev6, pd.DataFrame)
+    and not df_prev6.empty
+)
+
 if not prev_available:
     st.info("若要完整 Hotspot Statistic（含上月比較），請上傳上月資料。")
 
-try:
-    # site-level AP counts（本月 / 上月）
-    curr_site_ap = df_curr6.groupby("Site Code").size().rename("AP_Count_Curr")
-    prev_site_ap = df_prev6.groupby("Site Code").size().rename("AP_Count_Prev") if prev_available else pd.Series(dtype=int)
+# ===== 分類顯示名稱 =====
+category_map = {
+    "CTM WiFi": ("Fixed Hotspot", "Fixed Wi-Fi (CTM Wi-Fi Hotspot)"),
+    "Managed WiFi": ("Fixed Hotspot", "Fixed Wi-Fi (Managed Wi-Fi)"),
+    "Mixed Site": ("Fixed Hotspot", "Fixed Wi-Fi (CTM Wi-Fi Hotspot & Managed Wi-Fi)"),
+    "Bus WiFi": ("Transportation", "Public Bus Wi-Fi (CTM Wi-Fi Hotspot)"),
+    "Ferry WiFi": ("Transportation", "Ferry (Managed Wi-Fi)"),
+    "Limo WiFi": ("Transportation", "Limo / Shuttle (Managed Wi-Fi)")
+}
 
-    sites_curr = set(curr_site_ap.index.tolist())
-    sites_prev = set(prev_site_ap.index.tolist())
+# ===== 防呆工具 =====
+def _safe_get(df, key, col, default=0):
+    try:
+        return df.loc[key, col]
+    except Exception:
+        return default
+
+def _safe_row(df, col, value, default):
+    sub = df[df[col] == value]
+    return sub.iloc[0] if not sub.empty else default
+
+# ===== 計算 Hotspot Statistic =====
+hotspot_stat_df = None
+
+try:
+    curr_site_ap = df_curr6.groupby("Site Code").size()
+    prev_site_ap = df_prev6.groupby("Site Code").size() if prev_available else pd.Series(dtype=int)
+
+    sites_curr = set(curr_site_ap.index)
+    sites_prev = set(prev_site_ap.index)
 
     new_sites = sites_curr - sites_prev
     ceased_sites = sites_prev - sites_curr
     common_sites = sites_curr & sites_prev
 
-    # New / Cessation AP 計算
-    new_ap_from_new_sites = int(curr_site_ap.loc[list(new_sites)].sum()) if new_sites else 0
-    ap_diff_common = (curr_site_ap.reindex(list(common_sites), fill_value=0) - prev_site_ap.reindex(list(common_sites), fill_value=0))
-    new_ap_from_increase = int(ap_diff_common[ap_diff_common > 0].sum()) if not ap_diff_common.empty else 0
-    new_ap_total = new_ap_from_new_sites + new_ap_from_increase
-
-    ceased_ap_from_sites = int(prev_site_ap.loc[list(ceased_sites)].sum()) if ceased_sites else 0
-    ceased_ap_from_decrease = int((-ap_diff_common[ap_diff_common < 0]).sum()) if not ap_diff_common.empty else 0
-    ceased_ap_total = ceased_ap_from_sites + ceased_ap_from_decrease
+    ap_diff_common = (
+        curr_site_ap.reindex(common_sites, fill_value=0)
+        - prev_site_ap.reindex(common_sites, fill_value=0)
+    )
 
     new_site_count = len(new_sites)
     ceased_site_count = len(ceased_sites)
+    new_ap_total = int(curr_site_ap.loc[list(new_sites)].sum()) if new_sites else 0
+    new_ap_total += int(ap_diff_common[ap_diff_common > 0].sum())
+    ceased_ap_total = int(prev_site_ap.loc[list(ceased_sites)].sum()) if ceased_sites else 0
+    ceased_ap_total += int((-ap_diff_common[ap_diff_common < 0]).sum())
 
-    # 分類顯示名稱對應（合併為 Fixed Hotspot / Transportation）
-    category_map = {
-        "CTM WiFi": ("Fixed Hotspot", "Fixed Wi-Fi (CTM Wi-Fi Hotspot)"),
-        "Managed WiFi": ("Fixed Hotspot", "Fixed Wi-Fi (Managed Wi-Fi)"),
-        "Mixed Site": ("Fixed Hotspot", "Fixed Wi-Fi (CTM Wi-Fi Hotspot & Managed Wi-Fi)"),
-        "Bus WiFi": ("Transportation", "Public Bus Wi-Fi (CTM Wi-Fi Hotspot)"),
-        "Ferry WiFi": ("Transportation", "Ferry (Managed Wi-Fi)"),
-        "Limo WiFi": ("Transportation", "Limo / Shuttle (Managed Wi-Fi)")
-    }
+    site_curr = df_curr6.groupby("Category")["Site Code"].nunique().reindex(CATEGORY_ORDER, fill_value=0)
+    site_prev = (
+        df_prev6.groupby("Category")["Site Code"].nunique().reindex(CATEGORY_ORDER, fill_value=0)
+        if prev_available else site_curr * 0
+    )
+    ap_curr = df_curr6.groupby("Category").size().reindex(CATEGORY_ORDER, fill_value=0)
+    ap_prev = (
+        df_prev6.groupby("Category").size().reindex(CATEGORY_ORDER, fill_value=0)
+        if prev_available else ap_curr * 0
+    )
 
-    # 聚合函式（回傳 Category 順序的 Site 與 AP）
-    def agg_by_category(df6):
-        if df6 is None or df6.empty:
-            return pd.DataFrame({
-                "Category": CATEGORY_ORDER,
-                "Site_Count": [0]*len(CATEGORY_ORDER),
-                "AP_Count": [0]*len(CATEGORY_ORDER)
-            })
-        site_counts = df6.groupby("Category")["Site Code"].nunique().reindex(CATEGORY_ORDER, fill_value=0)
-        ap_counts = df6.groupby("Category").size().reindex(CATEGORY_ORDER, fill_value=0)
-        return pd.DataFrame({
-            "Category": CATEGORY_ORDER,
-            "Site_Count": site_counts.values,
-            "AP_Count": ap_counts.values
-        })
+    rows = [
+        {"Section":"New Installation","Category":"No. of Site","Prev":"","Curr":new_site_count,"vs":""},
+        {"Section":"New Installation","Category":"No. of AP","Prev":"","Curr":new_ap_total,"vs":""},
+        {"Section":"Cessation","Category":"No. of Site","Prev":"","Curr":ceased_site_count,"vs":""},
+        {"Section":"Cessation","Category":"No. of AP","Prev":"","Curr":ceased_ap_total,"vs":""},
+        {"Section":"Total","Category":"Total of Site","Prev":int(site_prev.sum()),"Curr":int(site_curr.sum()),"vs":int(site_curr.sum()-site_prev.sum())},
+    ]
 
-    agg_curr = agg_by_category(df_curr6)
-    agg_prev = agg_by_category(df_prev6) if prev_available else agg_by_category(pd.DataFrame(columns=df_curr6.columns))
-
-    total_site_by_cat = agg_curr.set_index("Category")["Site_Count"].reindex(CATEGORY_ORDER, fill_value=0).astype(int)
-    total_ap_by_cat = agg_curr.set_index("Category")["AP_Count"].reindex(CATEGORY_ORDER, fill_value=0).astype(int)
-    prev_site_by_cat = agg_prev.set_index("Category")["Site_Count"].reindex(CATEGORY_ORDER, fill_value=0).astype(int)
-    prev_ap_by_cat = agg_prev.set_index("Category")["AP_Count"].reindex(CATEGORY_ORDER, fill_value=0).astype(int)
-
-    # 構建輸出資料（Prev 在 Curr 前）
-    rows = []
-    # New Installation
-    rows.append({"Section":"New Installation","Category":"No. of Site","Prev": "", "Curr": new_site_count, "vs": ""})
-    rows.append({"Section":"New Installation","Category":"No. of AP","Prev": "", "Curr": new_ap_total, "vs": ""})
-    # Cessation
-    rows.append({"Section":"Cessation","Category":"No. of Site","Prev": "", "Curr": ceased_site_count, "vs": ""})
-    rows.append({"Section":"Cessation","Category":"No. of AP","Prev": "", "Curr": ceased_ap_total, "vs": ""})
-
-    # Total of Site (顯示 vs)
-    total_site_curr = int(total_site_by_cat.sum())
-    total_site_prev = int(prev_site_by_cat.sum())
-    rows.append({"Section":"Total","Category":"Total of Site","Prev": total_site_prev, "Curr": total_site_curr, "vs": int(total_site_curr - total_site_prev)})
-
-    # Per-category Site rows (Prev shown, vs empty) — will be grouped into Fixed/Transportation in HTML
-    for cat in CATEGORY_ORDER:
-        sect, label = category_map.get(cat, ("Other", cat))
+    for c in CATEGORY_ORDER:
         rows.append({
             "Section":"Total",
-            "Category": label,
-            "Prev": int(prev_site_by_cat[cat]),
-            "Curr": int(total_site_by_cat[cat]),
-            "vs": ""
+            "Category":category_map[c][1],
+            "Prev":int(site_prev[c]),
+            "Curr":int(site_curr[c]),
+            "vs":""
         })
 
-    # Total of AP (顯示 vs)
-    total_ap_curr = int(total_ap_by_cat.sum())
-    total_ap_prev = int(prev_ap_by_cat.sum())
-    rows.append({"Section":"Total_AP","Category":"Total of AP","Prev": total_ap_prev, "Curr": total_ap_curr, "vs": int(total_ap_curr - total_ap_prev)})
+    rows.append({
+        "Section":"Total_AP",
+        "Category":"Total of AP",
+        "Prev":int(ap_prev.sum()),
+        "Curr":int(ap_curr.sum()),
+        "vs":int(ap_curr.sum()-ap_prev.sum())
+    })
 
-    # Per-category AP rows
-    for cat in CATEGORY_ORDER:
-        sect, label = category_map.get(cat, ("Other", cat))
+    for c in CATEGORY_ORDER:
         rows.append({
             "Section":"Total_AP",
-            "Category": label,
-            "Prev": int(prev_ap_by_cat[cat]),
-            "Curr": int(total_ap_by_cat[cat]),
-            "vs": ""
+            "Category":category_map[c][1],
+            "Prev":int(ap_prev[c]),
+            "Curr":int(ap_curr[c]),
+            "vs":""
         })
 
     hotspot_stat_df = pd.DataFrame(rows)
 
-    # 轉成 HTML table 以支援合併單元格與三塊分隔（Prev 在 Curr 前）
-    def build_html_table(df, month_prev_label, month_curr_label):
-        css = """
-        <style>
-        table.hotstat {border-collapse: collapse; width:100%; font-size:14px;}
-        table.hotstat th, table.hotstat td {border:1px solid #ddd; padding:6px; text-align:center;}
-        table.hotstat th {background:#f7f7f7; font-weight:700;}
-        .section-title {font-weight:700; text-align:left; padding:8px 0;}
-        .sep {border-top:3px solid #333;}
-        .bold-row td {font-weight:700; background:#fafafa;}
-        .group-cell {font-weight:700; background:#fff; vertical-align:middle;}
-        </style>
-        """
-        html = [css, "<table class='hotstat'>"]
-        # header (Prev before Curr)
-        html.append(f"<tr><th>Section</th><th>Category</th><th>{month_prev_label}</th><th>{month_curr_label}</th><th>vs Previous Month</th></tr>")
+except Exception as e:
+    st.error(f"產生 Hotspot Statistic 資料時發生錯誤：{e}")
 
-        # 1) New Installation & Cessation block (first 4 rows)
-        # New Installation (2 rows)
-        for i in range(0,2):
-            r = df.iloc[i]
-            if i == 0:
-                html.append(f"<tr><td rowspan='2'>New Installation</td><td>{r['Category']}</td><td>{r['Prev']}</td><td>{r['Curr']}</td><td>{r['vs']}</td></tr>")
-            else:
-                html.append(f"<tr><td>{r['Category']}</td><td>{r['Prev']}</td><td>{r['Curr']}</td><td>{r['vs']}</td></tr>")
+# ===== HTML 表格（三塊格式，防呆） =====
+def build_html_table(df):
+    css = """
+    <style>
+    table.hotstat {border-collapse: collapse; width:100%; font-size:18px;}
+    table.hotstat th, table.hotstat td {border:1px solid #ddd; padding:6px; text-align:center;}
+    table.hotstat th {background:#f7f7f7; font-weight:700;}
+    .bold-row td {font-weight:700; background:#fafafa;}
+    .group-cell {font-weight:700; vertical-align:middle;}
+    .sep td {border-top:3px solid #333;}
+    </style>
+    """
+    html = [css, "<table class='hotstat'>"]
+    html.append(
+        f"<tr><th>Section</th><th>Category</th>"
+        f"<th>{month_prev_label}</th><th>{month_curr_label}</th><th>vs Previous Month</th></tr>"
+    )
 
-        # Cessation (2 rows)
-        html.append("<tr class='sep'></tr>")  # thin visual separator between New and Cessation
-        for i in range(2,4):
-            r = df.iloc[i]
-            if i == 2:
-                html.append(f"<tr><td rowspan='2'>Cessation</td><td>{r['Category']}</td><td>{r['Prev']}</td><td>{r['Curr']}</td><td>{r['vs']}</td></tr>")
-            else:
-                html.append(f"<tr><td>{r['Category']}</td><td>{r['Prev']}</td><td>{r['Curr']}</td><td>{r['vs']}</td></tr>")
-
-        # 大分隔線：結束 New/Cessation，開始 Total of Site block
-        html.append("<tr class='sep'></tr>")
-
-        # 2) Total of Site block (Total of Site row + grouped Fixed Hotspot / Transportation site rows)
-        r_tot_site = df[df['Category']=="Total of Site"].iloc[0]
-        html.append(f"<tr class='bold-row'><td> </td><td>{r_tot_site['Category']}</td><td>{r_tot_site['Prev']}</td><td>{r_tot_site['Curr']}</td><td>{r_tot_site['vs']}</td></tr>")
-
-        # prepare labels
-        fixed_labels = [category_map[c][1] for c in ["CTM WiFi","Managed WiFi","Mixed Site"]]
-        trans_labels = [category_map[c][1] for c in ["Bus WiFi","Ferry WiFi","Limo WiFi"]]
-
-        site_rows = df[df['Section']=="Total"].set_index("Category")
-
-        # Fixed Hotspot group (merge group cell)
-        html.append(f"<tr><td class='group-cell' rowspan='{len(fixed_labels)}'>Fixed Hotspot</td><td>{fixed_labels[0]}</td><td>{site_rows.loc[fixed_labels[0],'Prev']}</td><td>{site_rows.loc[fixed_labels[0],'Curr']}</td><td></td></tr>")
-        for lbl in fixed_labels[1:]:
-            html.append(f"<tr><td>{lbl}</td><td>{site_rows.loc[lbl,'Prev']}</td><td>{site_rows.loc[lbl,'Curr']}</td><td></td></tr>")
-
-        # Transportation group
-        html.append(f"<tr><td class='group-cell' rowspan='{len(trans_labels)}'>Transportation</td><td>{trans_labels[0]}</td><td>{site_rows.loc[trans_labels[0],'Prev']}</td><td>{site_rows.loc[trans_labels[0],'Curr']}</td><td></td></tr>")
-        for lbl in trans_labels[1:]:
-            html.append(f"<tr><td>{lbl}</td><td>{site_rows.loc[lbl,'Prev']}</td><td>{site_rows.loc[lbl,'Curr']}</td><td></td></tr>")
-
-        # 大分隔線：結束 Site block，開始 AP block
-        html.append("<tr class='sep'></tr>")
-
-        # 3) Total of AP block (Total of AP row + grouped AP rows)
-        r_tot_ap = df[df['Category']=="Total of AP"].iloc[0]
-        html.append(f"<tr class='bold-row'><td> </td><td>{r_tot_ap['Category']}</td><td>{r_tot_ap['Prev']}</td><td>{r_tot_ap['Curr']}</td><td>{r_tot_ap['vs']}</td></tr>")
-
-        ap_rows = df[df['Section']=="Total_AP"].set_index("Category")
-
-        # Fixed Hotspot AP rows
-        html.append(f"<tr><td class='group-cell' rowspan='{len(fixed_labels)}'>Fixed Hotspot</td><td>{fixed_labels[0]}</td><td>{ap_rows.loc[fixed_labels[0],'Prev']}</td><td>{ap_rows.loc[fixed_labels[0],'Curr']}</td><td></td></tr>")
-        for lbl in fixed_labels[1:]:
-            html.append(f"<tr><td>{lbl}</td><td>{ap_rows.loc[lbl,'Prev']}</td><td>{ap_rows.loc[lbl,'Curr']}</td><td></td></tr>")
-
-        # Transportation AP rows
-        html.append(f"<tr><td class='group-cell' rowspan='{len(trans_labels)}'>Transportation</td><td>{trans_labels[0]}</td><td>{ap_rows.loc[trans_labels[0],'Prev']}</td><td>{ap_rows.loc[trans_labels[0],'Curr']}</td><td></td></tr>")
-        for lbl in trans_labels[1:]:
-            html.append(f"<tr><td>{lbl}</td><td>{ap_rows.loc[lbl,'Prev']}</td><td>{ap_rows.loc[lbl,'Curr']}</td><td></td></tr>")
-
-        html.append("</table>")
-        return "\n".join(html)
-
-    month_prev_label = month_prev_input or "Previous"
-    month_curr_label = month_curr_input or "Current"
-    html_table = build_html_table(hotspot_stat_df, month_prev_label, month_curr_label)
-    st.markdown(html_table, unsafe_allow_html=True)
-
-    # 下載：以 DataFrame（Prev 在前）匯出
-    export_df = hotspot_stat_df.copy()[["Section","Category","Prev","Curr","vs"]]
-    export_df = export_df.rename(columns={"Prev": month_prev_label, "Curr": month_curr_label, "vs":"vs Previous Month"})
-    csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("下載 Hotspot Statistic CSV", csv_bytes, file_name="hotspot_statistic.csv", mime="text/csv")
-
-    # Excel
-    try:
-        towrite = io.BytesIO()
-        with pd.ExcelWriter(towrite, engine="openpyxl") as writer:
-            export_df.to_excel(writer, index=False, sheet_name="HotspotStatistic")
-        # context manager 已經寫入並關閉 writer
-        towrite.seek(0)
-        excel_bytes = towrite.getvalue()
-        st.download_button(
-            "下載 Hotspot Statistic Excel",
-            excel_bytes,
-            file_name="hotspot_statistic.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    # New / Cessation
+    for sec in ["New Installation","Cessation"]:
+        part = df[df["Section"] == sec]
+        html.append(
+            f"<tr><td rowspan='2'>{sec}</td>"
+            f"<td>{part.iloc[0]['Category']}</td><td>{part.iloc[0]['Prev']}</td>"
+            f"<td>{part.iloc[0]['Curr']}</td><td>{part.iloc[0]['vs']}</td></tr>"
+        )
+        html.append(
+            f"<tr><td>{part.iloc[1]['Category']}</td><td>{part.iloc[1]['Prev']}</td>"
+            f"<td>{part.iloc[1]['Curr']}</td><td>{part.iloc[1]['vs']}</td></tr>"
         )
 
-    except Exception as _e:
-        st.warning(f"Excel 下載暫時不可用：{_e}")
+    html.append("<tr class='sep'><td colspan='5'></td></tr>")
 
-except Exception as e:
-    st.error(f"產生 Hotspot Statistic 時發生錯誤：{e}")
+    # Total Site
+    tot_site = _safe_row(df,"Category","Total of Site",{"Category":"Total of Site","Prev":0,"Curr":0,"vs":0})
+    html.append(
+        f"<tr class='bold-row'><td></td><td>{tot_site['Category']}</td>"
+        f"<td>{tot_site['Prev']}</td><td>{tot_site['Curr']}</td><td>{tot_site['vs']}</td></tr>"
+    )
+
+    site_rows = df[df["Section"]=="Total"].set_index("Category")
+    fixed = [category_map[c][1] for c in ["CTM WiFi","Managed WiFi","Mixed Site"]]
+    trans = [category_map[c][1] for c in ["Bus WiFi","Ferry WiFi","Limo WiFi"]]
+
+    html.append(
+        f"<tr><td class='group-cell' rowspan='3'>Fixed Hotspot</td>"
+        f"<td>{fixed[0]}</td><td>{_safe_get(site_rows,fixed[0],'Prev')}</td>"
+        f"<td>{_safe_get(site_rows,fixed[0],'Curr')}</td><td></td></tr>"
+    )
+    for lbl in fixed[1:]:
+        html.append(
+            f"<tr><td>{lbl}</td><td>{_safe_get(site_rows,lbl,'Prev')}</td>"
+            f"<td>{_safe_get(site_rows,lbl,'Curr')}</td><td></td></tr>"
+        )
+
+    html.append(
+        f"<tr><td class='group-cell' rowspan='3'>Transportation</td>"
+        f"<td>{trans[0]}</td><td>{_safe_get(site_rows,trans[0],'Prev')}</td>"
+        f"<td>{_safe_get(site_rows,trans[0],'Curr')}</td><td></td></tr>"
+    )
+    for lbl in trans[1:]:
+        html.append(
+            f"<tr><td>{lbl}</td><td>{_safe_get(site_rows,lbl,'Prev')}</td>"
+            f"<td>{_safe_get(site_rows,lbl,'Curr')}</td><td></td></tr>"
+        )
+
+    html.append("<tr class='sep'><td colspan='5'></td></tr>")
+
+    # Total AP
+    tot_ap = _safe_row(df,"Category","Total of AP",{"Category":"Total of AP","Prev":0,"Curr":0,"vs":0})
+    html.append(
+        f"<tr class='bold-row'><td></td><td>{tot_ap['Category']}</td>"
+        f"<td>{tot_ap['Prev']}</td><td>{tot_ap['Curr']}</td><td>{tot_ap['vs']}</td></tr>"
+    )
+
+    ap_rows = df[df["Section"]=="Total_AP"].set_index("Category")
+
+    html.append(
+        f"<tr><td class='group-cell' rowspan='3'>Fixed Hotspot</td>"
+        f"<td>{fixed[0]}</td><td>{_safe_get(ap_rows,fixed[0],'Prev')}</td>"
+        f"<td>{_safe_get(ap_rows,fixed[0],'Curr')}</td><td></td></tr>"
+    )
+    for lbl in fixed[1:]:
+        html.append(
+            f"<tr><td>{lbl}</td><td>{_safe_get(ap_rows,lbl,'Prev')}</td>"
+            f"<td>{_safe_get(ap_rows,lbl,'Curr')}</td><td></td></tr>"
+        )
+
+    html.append(
+        f"<tr><td class='group-cell' rowspan='3'>Transportation</td>"
+        f"<td>{trans[0]}</td><td>{_safe_get(ap_rows,trans[0],'Prev')}</td>"
+        f"<td>{_safe_get(ap_rows,trans[0],'Curr')}</td><td></td></tr>"
+    )
+    for lbl in trans[1:]:
+        html.append(
+            f"<tr><td>{lbl}</td><td>{_safe_get(ap_rows,lbl,'Prev')}</td>"
+            f"<td>{_safe_get(ap_rows,lbl,'Curr')}</td><td></td></tr>"
+        )
+
+    html.append("</table>")
+    return "\n".join(html)
+
+# ===== 顯示 =====
+if hotspot_stat_df is not None and not hotspot_stat_df.empty:
+    st.markdown(build_html_table(hotspot_stat_df), unsafe_allow_html=True)
+else:
+    st.warning("目前沒有 Hotspot Statistic 可顯示。")
+
+# ===== Excel 下載 =====
+if hotspot_stat_df is not None:
+    export_df = hotspot_stat_df.rename(columns={
+        "Prev": month_prev_label,
+        "Curr": month_curr_label,
+        "vs": "vs Previous Month"
+    })
+
+    bio = io.BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        export_df.to_excel(writer, index=False, sheet_name="HotspotStatistic")
+
+    bio.seek(0)
+
+    st.download_button(
+        "下載 Hotspot Statistic Excel",
+        bio.getvalue(),
+        "hotspot_statistic.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 # =========================
 # 本月（僅六類）統計與視覺化（重構：先預計算，再顯示）
