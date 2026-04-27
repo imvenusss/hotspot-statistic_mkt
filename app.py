@@ -44,7 +44,7 @@ MANAGED_GROUP_NAMES = {
     "Ferry WiFi": "Ferry",
     "Limo WiFi": "Limo/Shuttle"
 }
-MANAGED_GROUP_ORDER = ["Managed Wi‑Fi", "Mixed Site", "Ferry", "Limo/Shuttle"]
+MANAGED_GROUP_ORDER = ["Managed WiFi", "Mixed Site", "Ferry WiFi", "Limo WiFi"]
 
 WIFI_LEVELS_DISPLAY = ["Wi‑Fi 4", "Wi‑Fi 5", "Wi‑Fi 6", "Wi‑Fi 7"]
 
@@ -592,6 +592,53 @@ def page_dashboard():
         layout="wide"
     )
 
+
+    # ✅ 全域 CSS（調整 dataframe 字體大小）
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stDataFrame"] td {
+            font-size: 22px;
+        }
+        div[data-testid="stDataFrame"] th {
+            font-size: 22px;
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        """
+        <style>
+        /* ─────────────────────────────
+           ✅ 只影響 st.table（Summary / Vendor / Wi‑Fi 表）
+           ✅ 不影響 hotspot statistic（自訂 HTML）
+           ✅ 不影響 st.dataframe
+           ───────────────────────────── */
+    
+        /* 所有 st.table 的儲存格一律靠左 */
+        div[data-testid="stTable"] table td {
+            text-align: left !important;
+        }
+    
+        /* 表頭也統一靠左 */
+        div[data-testid="stTable"] table th {
+            text-align: left !important;
+            font-weight: 600;
+        }
+    
+        /* 首欄（Category / Vendor / Wi‑Fi Technology）額外加粗 */
+        div[data-testid="stTable"] table td:first-child {
+            font-weight: 600;
+            color: #000;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+        
     st.title("📶 WiFi AP 統計面板")
 
     with st.sidebar:
@@ -677,6 +724,110 @@ def page_dashboard():
     df_curr6_sm["Category_site_majority"] = (
         df_curr6_sm["Site Code"].map(cat_curr_by_site)
     )
+
+
+    summary_rows = []
+    per_category_wifi_tables = {}
+    per_category_vendor_tables = {}
+    
+    for cat in CATEGORY_ORDER:
+        df_cat = df_curr6_sm[
+            df_curr6_sm["Category_site_majority"] == cat
+        ]
+    
+        site_count = df_cat["Site Code"].nunique()
+        ap_count = len(df_cat)
+    
+        wifi_counts = count_wifi_tech_series(df_cat)
+        vendor_counts = (
+            df_cat["Vendor"]
+            .value_counts()
+            .reindex(["Huawei", "Ruckus"], fill_value=0)
+        )
+    
+        row = {
+            "Category": cat,
+            "Site Count": int(site_count),
+            "Wi‑Fi 4": int(wifi_counts.get("Wi‑Fi 4", 0)),
+            "Wi‑Fi 5": int(wifi_counts.get("Wi‑Fi 5", 0)),
+            "Wi‑Fi 6": int(wifi_counts.get("Wi‑Fi 6", 0)),
+            "Wi‑Fi 7": int(wifi_counts.get("Wi‑Fi 7", 0)),
+            "Huawei": int(vendor_counts.get("Huawei", 0)),
+            "Ruckus": int(vendor_counts.get("Ruckus", 0)),
+            "AP Count": int(ap_count),
+        }
+        summary_rows.append(row)
+    
+        # 個別分類表（給下載用）
+        per_category_wifi_tables[cat] = (
+            pd.DataFrame({
+                "Wi‑Fi Technology": WIFI_LEVELS_DISPLAY,
+                "Count": [wifi_counts.get(t, 0) for t in WIFI_LEVELS_DISPLAY]
+            })
+        )
+    
+        per_category_vendor_tables[cat] = (
+            vendor_counts
+            .rename_axis("Vendor")
+            .reset_index(name="Count")
+        )
+    
+    summary_df = pd.DataFrame(summary_rows)
+    
+    # ---------- 六類總 Wi‑Fi ----------
+    total_wifi_df = (
+        summary_df[["Wi‑Fi 4","Wi‑Fi 5","Wi‑Fi 6","Wi‑Fi 7"]]
+        .sum()
+        .rename_axis("Wi‑Fi Technology")
+        .reset_index(name="Count")
+    )
+    
+    # ---------- 六類總 Vendor ----------
+    total_vendor_df = (
+        df_curr6_sm["Vendor"]
+        .value_counts()
+        .reindex(["Huawei", "Ruckus"], fill_value=0)
+        .rename_axis("Vendor")
+        .reset_index(name="Count")
+    )
+    
+    # ---------- 六類 Wi‑Fi 占比圖資料 ----------
+    pct_rows = []
+    for cat in CATEGORY_ORDER:
+        df_cat = df_curr6_sm[df_curr6_sm["Category_site_majority"] == cat]
+        wifi_counts = count_wifi_tech_series(df_cat)
+        for tech in WIFI_LEVELS_DISPLAY:
+            cnt = int(wifi_counts.get(tech, 0))
+            if cnt > 0:
+                pct_rows.append({
+                    "Category": cat,
+                    "Wi‑Fi Technology": tech,
+                    "Count": cnt
+                })
+    
+    # ---------- Managed 四類彙總 ----------
+    summary_rows_managed = []
+    for cat in MANAGED_GROUP_ORDER:
+        df_cat = df_curr6_sm[df_curr6_sm["Category_site_majority"] == cat]
+        wifi_counts = count_wifi_tech_series(df_cat)
+        vendor_counts = (
+            df_cat["Vendor"]
+            .value_counts()
+            .reindex(["Huawei", "Ruckus"], fill_value=0)
+        )
+        summary_rows_managed.append({
+            "Category": MANAGED_GROUP_NAMES.get(cat, cat),
+            "Site Count": df_cat["Site Code"].nunique(),
+            "Wi‑Fi 4": int(wifi_counts.get("Wi‑Fi 4", 0)),
+            "Wi‑Fi 5": int(wifi_counts.get("Wi‑Fi 5", 0)),
+            "Wi‑Fi 6": int(wifi_counts.get("Wi‑Fi 6", 0)),
+            "Wi‑Fi 7": int(wifi_counts.get("Wi‑Fi 7", 0)),
+            "Huawei": int(vendor_counts.get("Huawei", 0)),
+            "Ruckus": int(vendor_counts.get("Ruckus", 0)),
+            "AP Count": len(df_cat),
+        })
+    
+    summary_df_managed = pd.DataFrame(summary_rows_managed)
     
     # =========================
     # ✅ 統一 Site / AP 計算層（唯一權威來源）
@@ -785,11 +936,9 @@ def page_dashboard():
         st.warning(f"異常列產生時發生問題：{_e}")
     # === 新增結束 ===
     
-    
-    # -------------------------
-    # -------------------------
-    # Hotspot Statistic
-    # -------------------------
+
+    # 1. Hotspot Statistic
+    #=================================================================================================================================================================
     st.markdown("## 🔎 Hotspot Statistic")
     
     # ===== 月份顯示文字 =====
@@ -836,8 +985,11 @@ def page_dashboard():
     hotspot_stat_df = None
     
     try:
-        curr_site_ap = df_curr6.groupby("Site Code").size()
-        prev_site_ap = df_prev6.groupby("Site Code").size() if prev_available else pd.Series(dtype=int)
+        curr_site_ap = df_curr6_sm.groupby("Site Code").size()
+        prev_site_ap = (
+            df_prev6.groupby("Site Code").size()
+            if prev_available else pd.Series(dtype=int)
+        )
     
         sites_curr = set(curr_site_ap.index)
         sites_prev = set(prev_site_ap.index)
@@ -875,22 +1027,21 @@ def page_dashboard():
         # ✅ AP 計算也改為 Site-majority 口徑
         # ──────────────────────────────
         ap_curr = (
-            df_curr6
-            .assign(_site_cat=lambda x: x["Site Code"].map(cat_curr_by_site))
-            .groupby("_site_cat")
+            df_curr6_sm
+            .groupby("Category_site_majority")
             .size()
             .reindex(CATEGORY_ORDER, fill_value=0)
         )
-    
+            
         ap_prev = (
             df_prev6
-            .assign(_site_cat=lambda x: x["Site Code"].map(cat_prev_by_site))
-            .groupby("_site_cat")
+            .assign(Category_site_majority=lambda x: x["Site Code"].map(cat_prev_by_site))
+            .groupby("Category_site_majority")
             .size()
             .reindex(CATEGORY_ORDER, fill_value=0)
             if prev_available else ap_curr * 0
-        )
-    
+        )    
+
         rows = [
             {"Section":"New Installation","Category":"No. of Site","Prev":"","Curr":new_site_count,"vs":""},
             {"Section":"New Installation","Category":"No. of AP","Prev":"","Curr":new_ap_total,"vs":""},
@@ -1058,122 +1209,51 @@ def page_dashboard():
             "hotspot_statistic.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    
-    # =========================
-    # 本月（僅六類）統計與視覺化（重構：先預計算，再顯示）
-    # =========================
-    st.subheader("📊 本月六類合併統計")
-    category_dfs_curr = {cat: df_curr6[df_curr6["Category"] == cat].copy() for cat in CATEGORY_ORDER}
-    # 安全 concat（若所有子表都為空，回傳空 DataFrame）
-    vals = [v for v in category_dfs_curr.values() if not v.empty]
-    combined_df = pd.concat(vals, ignore_index=True) if vals else pd.DataFrame(columns=df_curr6.columns)
-    
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("本月：總 AP（六類）", len(combined_df))
-    m2.metric("本月：總 Site（六類去重）", combined_df["Site Code"].nunique() if not combined_df.empty else 0)
-    m3.metric("本月：Huawei（六類）", int((combined_df["Vendor"]=="Huawei").sum()) if not combined_df.empty else 0)
-    m4.metric("本月：Ruckus（六類）", int((combined_df["Vendor"]=="Ruckus").sum()) if not combined_df.empty else 0)
-    
-    # ---------- 預計算：建立 summary_rows / per_category tables（不做 expanders） ----------
-    summary_rows = []
-    per_category_wifi_tables = {}
-    per_category_vendor_tables = {}
-    pct_rows = []
-    site_count_map = {}
-    
-    for name in CATEGORY_ORDER:
-        sub_df = df_curr6_sm[
-            df_curr6_sm["Category_site_majority"] == name
-        ]
-    
-    
-        # ✅【關鍵修改 1】Site 數：使用 Site-majority 統一口徑
-        site_count = int(site_curr_view.get(name, 0))
-        site_count_map[name] = site_count
-    
-        # ✅【關鍵修改 2】AP 數：AP 跟著 Site-majority 走
-        ap_count = int(ap_curr_view.get(name, 0))
-    
-        # ✅ 下面這些都不用改（仍然用 sub_df 做技術分佈）
-        wifi_series = (
-            count_wifi_tech_series(sub_df)
-            if not sub_df.empty
-            else pd.Series(0, index=WIFI_LEVELS_DISPLAY)
-        )
-    
-        vendor_series = (
-            sub_df["Vendor"]
-            .value_counts()
-            .reindex(["Huawei","Ruckus"], fill_value=0)
-            if not sub_df.empty
-            else pd.Series([0, 0], index=["Huawei","Ruckus"])
-        )
 
+    st.divider()     
 
-        # ✅✅✅ 4️⃣ 【這裡】加入 summary_rows（各分類）
-        summary_rows.append({
-            "Category": name,                # ✅ 用 name
-            "Site Count": site_count,
-            "Wi‑Fi 4": int(wifi_series.get("Wi‑Fi 4", 0)),
-            "Wi‑Fi 5": int(wifi_series.get("Wi‑Fi 5", 0)),
-            "Wi‑Fi 6": int(wifi_series.get("Wi‑Fi 6", 0)),
-            "Wi‑Fi 7": int(wifi_series.get("Wi‑Fi 7", 0)),
-            "Ruckus": int(vendor_series.get("Ruckus", 0)),
-            "Huawei": int(vendor_series.get("Huawei", 0)),
-            "AP Count": ap_count
-        })
-
+    # 2. KPI 區塊：本月六類合併統計（Site / AP）
+    # ==============================================================================================================================================================
+    # ✅ 六類 AP 合併（Site‑majority 口徑）
         
-        # 準備顯示用表格
-        wifi_full = sub_df["Wifi Technology (norm)"].value_counts() if not sub_df.empty else pd.Series(dtype=int)
-        wifi_df = series_to_df_for_chart(wifi_series, "Wi‑Fi Technology", "Count", show_unknown, wifi_full)
-        per_category_wifi_tables[name] = wifi_df.copy()
+    category_dfs_curr = {
+        cat: df_curr6_sm[df_curr6_sm["Category_site_majority"] == cat].copy()
+        for cat in CATEGORY_ORDER
+    }
+    vals = [v for v in category_dfs_curr.values() if not v.empty]
+    combined_df = (
+        pd.concat(vals, ignore_index=True)
+        if vals
+        else pd.DataFrame(columns=df_curr6_sm.columns)
+    )
     
-        vendor_df = vendor_series.rename_axis("Vendor").reset_index(name="Count")
-        per_category_vendor_tables[name] = vendor_df.copy()
-    
-        total_c = wifi_df["Count"].sum()
-        if total_c == 0:
-            for tech in wifi_df["Wi‑Fi Technology"].tolist():
-                pct_rows.append({"Category": name, "Wi‑Fi Technology": tech, "Count": 0, "Percent": 0.0})
-        else:
-            for _, r in wifi_df.iterrows():
-                pct_rows.append({
-                    "Category": name,
-                    "Wi‑Fi Technology": r["Wi‑Fi Technology"],
-                    "Count": int(r["Count"]),
-                    "Percent": round(100.0*r["Count"]/total_c, 6)
-                })
-    
-    # ---------- 預計算結束 ----------
-    # ✅ 加上 Total（六類，僅一次）
-    summary_rows.append({
-        "Category": "Total",
-        "Site Count": combined_df["Site Code"].nunique() if not combined_df.empty else 0,
-        "Wi‑Fi 4": int((combined_df["Wifi Technology (norm)"] == "Wi‑Fi 4").sum()) if not combined_df.empty else 0,
-        "Wi‑Fi 5": int((combined_df["Wifi Technology (norm)"] == "Wi‑Fi 5").sum()) if not combined_df.empty else 0,
-        "Wi‑Fi 6": int((combined_df["Wifi Technology (norm)"] == "Wi‑Fi 6").sum()) if not combined_df.empty else 0,
-        "Wi‑Fi 7": int((combined_df["Wifi Technology (norm)"] == "Wi‑Fi 7").sum()) if not combined_df.empty else 0,
-        "Ruckus": int((combined_df["Vendor"] == "Ruckus").sum()) if not combined_df.empty else 0,
-        "Huawei": int((combined_df["Vendor"] == "Huawei").sum()) if not combined_df.empty else 0,
-        "AP Count": combined_df.shape[0]
-    })
-    # -------------------------
-    # 1) Managed/CTM Hotspot 對全網 AP 的占比（顯示）
-    # -------------------------
-    st.markdown("### 📈 Managed/CTM Hotspot 對全網 AP 的占比")
-    
-    # 全網 AP（六類）
+    # ✅ KPI 數值
     total_ap_all = len(combined_df)
     
-    # Managed Wi‑Fi（四類）
-    managed_df = df_curr6[df_curr6["Category"].isin(MANAGED_ORIGINAL_CATEGORIES)].copy()
+    managed_df = df_curr6_sm[
+        df_curr6_sm["Category_site_majority"].isin(MANAGED_ORIGINAL_CATEGORIES)
+    ].copy()
     managed_ap = len(managed_df)
     
-    # CTM Hotspot（CTM WiFi + Bus WiFi）
-    ctm_hotspot_ap = len(df_curr6[df_curr6["Category"].isin(["CTM WiFi", "Bus WiFi"])])
+    ctm_hotspot_ap = len(
+        df_curr6_sm[
+            df_curr6_sm["Category_site_majority"].isin(["CTM WiFi", "Bus WiFi"])
+        ]
+    )
     
-    # 分母安全處理：回傳整數百分比字串（例如 "57%"）
+    managed_site_count = sum(
+        1 for c in cat_curr_by_site.values()
+        if c in MANAGED_ORIGINAL_CATEGORIES
+    )
+    ctm_site_count = sum(
+        1 for c in cat_curr_by_site.values()
+        if c in ["CTM WiFi", "Bus WiFi"]
+    )
+    total_site_all = sum(
+        1 for c in cat_curr_by_site.values()
+        if c in CATEGORY_ORDER
+    )
+    
     def _pct_int_str(part: int, whole: int) -> str:
         if not whole:
             return "0%"
@@ -1182,407 +1262,70 @@ def page_dashboard():
     managed_pct_str = _pct_int_str(managed_ap, total_ap_all)
     ctm_pct_str = _pct_int_str(ctm_hotspot_ap, total_ap_all)
     
-    col1, col2, col3 = st.columns([1, 1, 1])
+    # ✅ KPI 顯示
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
         st.markdown(
-            f"**Managed Wi‑Fi（四類）**  \n"
-            f"{managed_ap:,} AP（{managed_pct_str}）"
+            f"""
+            <div style="line-height:1.4">
+                <div style="font-size:26px; font-weight:700;">Managed Wi‑Fi（四類）</div>
+                <div style="font-size:24px; font-weight:400;">{managed_site_count:,} Sites</div>
+                <div style="font-size:24px; font-weight:400;">{managed_ap:,} AP（{managed_pct_str}）</div>
+            </div>
+            """,
+            unsafe_allow_html=True
         )
+    
     with col2:
         st.markdown(
-            f"**CTM Hotspot（CTM WiFi + Bus WiFi）**  \n"
-            f"{ctm_hotspot_ap:,} AP（{ctm_pct_str}）"
+            f"""
+            <div style="line-height:1.4">
+                <div style="font-size:26px; font-weight:700;">CTM Hotspot（CTM WiFi + Bus WiFi）</div>
+                <div style="font-size:24px; font-weight:400;">{ctm_site_count:,} Sites</div>
+                <div style="font-size:24px; font-weight:400;">{ctm_hotspot_ap:,} AP（{ctm_pct_str}）</div>
+            </div>
+            """,
+            unsafe_allow_html=True
         )
+    
     with col3:
         st.markdown(
-            f"**全網 AP（六類）**  \n"
-            f"{total_ap_all:,} AP"
+            f"""
+            <div style="line-height:1.4">
+                <div style="font-size:26px; font-weight:700;">全網 AP（六類）</div>
+                <div style="font-size:24px; font-weight:400;">{total_site_all:,} Sites</div>
+                <div style="font-size:24px; font-weight:400;">{total_ap_all:,} AP</div>
+            </div>
+            """,
+            unsafe_allow_html=True
         )
     
+    # ✅ KPI 區塊結束
     
-    # -------------------------
-    # 2) 本月 - 各分類彙總（六類） 顯示（使用預計算的 summary_rows）
-    # -------------------------
-
-    summary_df = pd.DataFrame(summary_rows)
+    st.divider() 
     
-    COL_ORDER = [
-        "Category",
-        "Site Count",
-        "Wi‑Fi 4",
-        "Wi‑Fi 5",
-        "Wi‑Fi 6",
-        "Wi‑Fi 7",
-        "Ruckus",
-        "Huawei",
-        "AP Count"
-    ]
+    # 3. 本月總 AP（六類）的 Wi‑Fi Technology 統計表
+    # =================================================================================================================================================================
     
-    summary_df = summary_df[[c for c in COL_ORDER if c in summary_df.columns]]
+    st.markdown("## 📑 本月總 AP（六類）的 Wi‑Fi Technology 統計")
     
-    st.markdown("### 📑 本月 - 各分類彙總（六類）")
-    st.dataframe(summary_df, use_container_width=True)
-    
-    # -------------------------
-    # 3) 本月 - Managed Wi‑Fi 各分類彙總（四類） 顯示（使用獨立計算）
-    # -------------------------
-    st.subheader("📊 本月 - Managed Wi‑Fi 各分類彙總（四類）")
-    
-    managed_dfs_curr = {cat: df_curr6[df_curr6["Category"] == cat].copy() for cat in MANAGED_ORIGINAL_CATEGORIES}
-    vals_man = [v for v in managed_dfs_curr.values() if not v.empty]
-    combined_managed_df = pd.concat(vals_man, ignore_index=True) if vals_man else pd.DataFrame(columns=df_curr6.columns)
-    
-    summary_rows_managed = []
-    for name in MANAGED_ORIGINAL_CATEGORIES:
-        sub_df = df_curr6_sm[
-            df_curr6_sm["Category_site_majority"] == name
-        ]
-    
-        # ✅【關鍵修改 1】Site 數：Site‑majority（與 Hotspot Statistic 一致）
-        site_count = int(site_curr_view.get(name, 0))
-    
-        # ✅【關鍵修改 2】AP 數：AP 跟著 Site‑majority
-        ap_count = int(ap_curr_view.get(name, 0))
-    
-        # ✅【完全不用改】技術 / 品牌分析仍然使用 sub_df
-        wifi_series = (
-            count_wifi_tech_series(sub_df)
-            if not sub_df.empty
-            else pd.Series(0, index=WIFI_LEVELS_DISPLAY)
-        )
-    
-        vendor_series = (
-            sub_df["Vendor"]
-            .value_counts()
-            .reindex(["Huawei","Ruckus"], fill_value=0)
-            if not sub_df.empty
-            else pd.Series([0, 0], index=["Huawei","Ruckus"])
-        )
-        
-        summary_rows_managed.append({
-            "Category": MANAGED_GROUP_NAMES[name],
-            "Site Count": site_count,
-            "Wi‑Fi 4": int(wifi_series.get("Wi‑Fi 4",0)),
-            "Wi‑Fi 5": int(wifi_series.get("Wi‑Fi 5",0)),
-            "Wi‑Fi 6": int(wifi_series.get("Wi‑Fi 6",0)),
-            "Wi‑Fi 7": int(wifi_series.get("Wi‑Fi 7",0)),
-            "Ruckus": int(vendor_series.get("Ruckus",0)),
-            "Huawei": int(vendor_series.get("Huawei",0)),
-            "AP Count": ap_count
-        })
-
-    # ✅ 加上 Total（Managed Wi‑Fi，四類，只加一次）
-    summary_rows_managed.append({
-        "Category": "Total",
-        "Site Count": combined_managed_df["Site Code"].nunique() if not combined_managed_df.empty else 0,
-        "Wi‑Fi 4": int((combined_managed_df["Wifi Technology (norm)"]=="Wi‑Fi 4").sum()) if not combined_managed_df.empty else 0,
-        "Wi‑Fi 5": int((combined_managed_df["Wifi Technology (norm)"]=="Wi‑Fi 5").sum()) if not combined_managed_df.empty else 0,
-        "Wi‑Fi 6": int((combined_managed_df["Wifi Technology (norm)"]=="Wi‑Fi 6").sum()) if not combined_managed_df.empty else 0,
-        "Wi‑Fi 7": int((combined_managed_df["Wifi Technology (norm)"]=="Wi‑Fi 7").sum()) if not combined_managed_df.empty else 0,
-        "Huawei": int((combined_managed_df["Vendor"]=="Huawei").sum()) if not combined_managed_df.empty else 0,
-        "Ruckus": int((combined_managed_df["Vendor"]=="Ruckus").sum()) if not combined_managed_df.empty else 0,
-        "AP Count": combined_managed_df.shape[0]
-    })
-
-
-    summary_df_managed = pd.DataFrame(summary_rows_managed)
-    
-    COL_ORDER = [
-        "Category",
-        "Site Count",
-        "Wi‑Fi 4",
-        "Wi‑Fi 5",
-        "Wi‑Fi 6",
-        "Wi‑Fi 7",
-        "Ruckus",
-        "Huawei",
-        "AP Count"
-    ]
-    
-    summary_df_managed = summary_df_managed[
-        [c for c in COL_ORDER if c in summary_df_managed.columns]
-    ]
-    
-    st.dataframe(summary_df_managed, use_container_width=True)
-
-
-
-    # -------------------------
-    # 4) 最後顯示每分類的 expanders（使用預計算的 per_category_* 表格）
-    # 占比圖（分類單行；Sites 放右側縱向；圖例右移到圖外避免重疊，legend.x=1.10）
-    st.subheader("🧩 總 AP（六類）的 Wi‑Fi Technology 占比圖")
-    df_pct = pd.DataFrame(pct_rows)
-    if not df_pct.empty:
-        # 取得每個分類的 Sites 數
-        def _sites_of(cat: str) -> int:
-            m = summary_df.loc[summary_df["Category"] == cat, "Site Count"]
-            return int(m.values[0]) if len(m) else 0
-    
-        # 分類顯示為單行（不把 Sites 混入）
-        display_single_line_map = {
-            c: f"{CATEGORY_DISPLAY_NAMES.get(c, c)}"
-            for c in CATEGORY_ORDER
-        }
-        df_pct["Category_Display"] = df_pct["Category"].map(display_single_line_map)
-        ordered_display = [display_single_line_map[c] for c in CATEGORY_ORDER]
-        tech_order = WIFI_LEVELS_DISPLAY + (["Unknown"] if show_unknown else [])
-    
-        # === 先做每列×技術去重聚合 → 整數分配 ===
-        df_pct_base = (
-            df_pct
-            .groupby(["Category_Display", "Wi‑Fi Technology"], as_index=False, sort=False)
-            .agg(Count=("Count", "sum"))
-        )
-        df_pct_int = assign_integer_percent(
-            df_pct_base,
-            group_col="Category_Display",
-            count_col="Count",
-            out_col="PercentInt"
-        )
-    
-        fig_stacked = px.bar(
-            df_pct_int, x="PercentInt", y="Category_Display",
-            color="Wi‑Fi Technology",
-            category_orders={"Category_Display": ordered_display, "Wi‑Fi Technology": tech_order},
-            orientation="h", barmode="stack", color_discrete_map=COLOR_MAP,
-            title=None
-        )
-        fig_stacked.update_traces(texttemplate="%{x}%", textposition="inside", insidetextanchor="middle")
-    
-        # 套用統一樣式 —— 收一點繪圖區、加寬右側空間
-        fig_stacked = apply_clean_layout(
-            fig_stacked,
-            "Distribution of Wi‑Fi Technology",
-            remove_y_title=True,
-            percent_axis=True,
-            x_domain_end=0.86,   # 往左收（可視覺微調 0.84~0.90）
-            right_margin=300,    # 預留 Sites + Legend 空間
-            legend_x=0.99        # 先貼圖內最右，再補丁推出圖外
-        )
-    
-        # 圖例移到圖外右側（不與右側 Sites 重疊）
-        fig_stacked.update_layout(legend=dict(
-            x=1.10,               # 指定：>1.0 在繪圖區外（你要求的 1.10）
-            xanchor="left",
-            y=0.5, yanchor="middle",
-            bgcolor="rgba(255,255,255,0)"
-        ))
-        fig_stacked.update_layout(margin=dict(r=340))  # 右邊距加大以避免裁切
-    
-        # 在右側貼上每個分類的 Sites 數（視覺上像右側縱軸）
-        annotations = list(fig_stacked.layout.annotations) if fig_stacked.layout.annotations else []
-        for cat in CATEGORY_ORDER:
-            y_label = display_single_line_map[cat]
-            sites_n = _sites_of(cat)
-            annotations.append(dict(
-                xref="x", yref="y",
-                x=100,                 # 百分比軸最右端
-                y=y_label,             # 對應這一列的 y 類別
-                text=f"Sites: {sites_n}",
-                showarrow=False,
-                xanchor="left",
-                align="left",
-                font=dict(size=22, color="#000"),  # 右側 Sites 字號 22
-                xshift=10              # 往右挪一點，避免貼在線上
-            ))
-        fig_stacked.update_layout(annotations=annotations)
-    
-        # 類別刻度字號（若要統一 22）
-        fig_stacked.update_yaxes(tickfont=dict(size=22))
-    
-        st.plotly_chart(fig_stacked, use_container_width=True, config=PLOTLY_CONFIG)
-    
-    st.markdown("") 
-    
-    # Managed Wi‑Fi（四類）— 圖表 + 統計表（右側 Sites + 圖例外推，legend.x=1.10）
-    # =========================
-    st.subheader("🧩 Managed Wi‑Fi（四類）的 Wi‑Fi Technology 占比圖")
-    managed_df = df_curr6[df_curr6["Category"].isin(MANAGED_ORIGINAL_CATEGORIES)].copy()
-    if managed_df.empty:
-        st.info("目前六類資料中沒有 Managed/Mixed/Ferry/Limo 類別的 AP。")
-    else:
-        # 標準化 Category(Eng)：去除首尾空格，統一連字符為 ASCII '-'，避免鍵不一致
-        managed_df["Category(Eng)"] = managed_df["Category"].map(MANAGED_GROUP_NAMES).astype(str)
-        managed_df["Category(Eng)"] = (
-            managed_df["Category(Eng)"]
-            .str.strip()
-            .str.replace("‑", "-", regex=False)
-            .str.replace("–", "-", regex=False)
-            .str.replace("—", "-", regex=False)
-        )
-        
-        # === Managed 與 CTM Hotspot 對全網 AP 的占比（百分比字串、四捨五入為整數） ===
-        # 全網 AP（六類）
-        total_ap_all = len(combined_df)  # 你前面已經組好的六類合併 df
-    
-        # Managed Wi‑Fi（四類）：Managed/Mixed/Ferry/Limo
-        managed_ap = len(managed_df)
-    
-        # CTM Hotspot：CTM WiFi + Bus WiFi（仍僅限六類的範圍內）
-        ctm_hotspot_ap = len(df_curr6[df_curr6["Category"].isin(["CTM WiFi", "Bus WiFi"])])
-    
-        # 分母安全處理：回傳整數百分比字串（例如 "57%"）
-        def _pct_int_str(part: int, whole: int) -> str:
-            if not whole:
-                return "0%"
-            return f"{int(round(part / whole * 100, 0))}%"
-    
-        managed_pct_str = _pct_int_str(managed_ap, total_ap_all)
-        ctm_pct_str     = _pct_int_str(ctm_hotspot_ap, total_ap_all)
-    
-        # =========================
-        # 本月 Managed Wi‑Fi 四類彙總
-        # =========================
-    
-        # 1) 占比（橫條堆疊，顯示 Sites 在右側）
-        rows = []
-        display_order = []
-        for cat_eng in MANAGED_GROUP_ORDER:
-            cat_key = (
-                str(cat_eng).strip()
-                .replace("‑", "-").replace("–", "-").replace("—", "-")
-            )
-            sub = managed_df[managed_df["Category(Eng)"] == cat_key].copy()
-            sites_this = sub["Site Code"].nunique()
-    
-            wifi_series = count_wifi_tech_series(sub)
-            for tech in WIFI_LEVELS_DISPLAY:
-                rows.append({
-                    "Category": f"{cat_key}（Sites: {sites_this}）",
-                    "Wi‑Fi Technology": tech,
-                    "Count": int(wifi_series.get(tech, 0))
-                })
-            display_order.append(f"{cat_key}（Sites: {sites_this}）")
-    
-        df_mgd = pd.DataFrame(rows)
-    
-        if df_mgd["Count"].sum() > 0:
-            df_mgd["Percent"] = df_mgd["Count"] / df_mgd.groupby("Category")["Count"].transform("sum") * 100
-    
-            # 準備四類的 Sites 數（直接用 managed_df 保證鍵一致）
-            sites_map_mgd = (
-                managed_df.groupby("Category(Eng)")["Site Code"]
-                .nunique()
-                .to_dict()
-            )
-    
-            # 類別鍵的標準順序（全部轉為 ASCII '-'）
-            ordered_keys_mgd = [
-                str(k).strip().replace("‑","-").replace("–","-").replace("—","-")
-                for k in MANAGED_GROUP_ORDER
-            ]
-            display_single_line_map_mgd = {k: k for k in ordered_keys_mgd}
-    
-            # 將 df_mgd 由『名稱（Sites: N）』轉回『純鍵』
-            df_mgd_plot = df_mgd.copy()
-            df_mgd_plot["Category_Key"] = df_mgd_plot["Category"].apply(
-                lambda s: re.sub(r"（.*?）$", "", str(s)).strip()
-            )
-            df_mgd_plot["Category_Key"] = df_mgd_plot["Category_Key"].apply(
-                lambda s: re.sub(r"\(.*?\)$", "", str(s)).strip()
-            )
-    
-            # 顯示欄位（單行）
-            df_mgd_plot["Category_Display"] = df_mgd_plot["Category_Key"].map(display_single_line_map_mgd)
-    
-            # 類別順序（單行顯示）
-            ordered_display_mgd = [display_single_line_map_mgd[c] for c in ordered_keys_mgd]
-    
-            # === 先做每列×技術去重聚合 → 整數分配 ===
-            df_mgd_plot_base = (
-                df_mgd_plot
-                .groupby(["Category_Display", "Wi‑Fi Technology"], as_index=False, sort=False)
-                .agg(Count=("Count", "sum"))
-            )
-            df_mgd_plot_int = assign_integer_percent(
-                df_mgd_plot_base,
-                group_col="Category_Display",
-                count_col="Count",
-                out_col="PercentInt"
-            )
-    
-            # 繪圖（水平整數百分比堆疊條）
-            fig_mgd = px.bar(
-                df_mgd_plot_int,
-                x="PercentInt",
-                y="Category_Display",
-                color="Wi‑Fi Technology",
-                category_orders={"Category_Display": ordered_display_mgd, "Wi‑Fi Technology": WIFI_LEVELS_DISPLAY},
-                orientation="h",
-                barmode="stack",
-                color_discrete_map=COLOR_MAP,
-                title=None,
-                text="PercentInt"
-            )
-            fig_mgd.update_traces(texttemplate="%{x}%", textposition="inside", insidetextanchor="middle")
-    
-            # 套用統一樣式 —— 收一點繪圖區、加寬右側
-            fig_mgd = apply_clean_layout(
-                fig_mgd,
-                "Distribution of Wi‑Fi Technology for Managed Wi‑Fi",
-                remove_y_title=True,
-                percent_axis=True,
-                x_domain_end=0.86,   # 往左收，空出右側位置
-                right_margin=300,    # 預留 Sites + Legend 空間
-                legend_x=0.99        # 先貼圖內最右，再補丁推出圖外
-            )
-            
-            # 將標題向左移（0.0=最左，0.5=置中）
-            fig_mgd.update_layout(title=dict(x=0.15, xanchor="left"))
-            # 也可以用簡寫：fig_mgd.update_layout(title_x=0.15)
-    
-            # 圖例移到圖外右側（不與右側 Sites 重疊）
-            fig_mgd.update_layout(legend=dict(
-                x=1.01,               # 指定：>1.0 在繪圖區外（與全網一致）
-                xanchor="left",
-                y=0.5, yanchor="middle",
-                bgcolor="rgba(255,255,255,0)"
-            ))
-            fig_mgd.update_layout(margin=dict(r=340))  # 右邊距加大以避免裁切
-    
-            # 在右側貼上每個類別的 Sites 數
-            annotations = list(fig_mgd.layout.annotations) if fig_mgd.layout.annotations else []
-            for cat_key in ordered_keys_mgd:
-                y_label = display_single_line_map_mgd[cat_key]
-                sites_n = int(sites_map_mgd.get(cat_key, 0))
-                annotations.append(dict(
-                    xref="x", yref="y",
-                    x=100,                 # 百分比軸最右端
-                    y=y_label,             # 對應這一列 y 類別
-                    text=f"Sites: {sites_n}",
-                    showarrow=False,
-                    xanchor="left",
-                    align="left",
-                    font=dict(size=22, color="#000"),
-                    xshift=10
-                ))
-            fig_mgd.update_layout(annotations=annotations)
-    
-            # 類別刻度字號（可統一 22）
-            fig_mgd.update_yaxes(tickfont=dict(size=22))
-    
-            st.plotly_chart(fig_mgd, use_container_width=True, config=PLOTLY_CONFIG)
-    
-    
-    st.markdown("") 
-    st.markdown("") 
-    # =========================
-    # 總 AP（六類）Wi‑Fi Technology：表 + 「全網 AP」餅圖（數量，整數百分比）
-    # =========================
-    st.markdown("### 🔹 本月總 AP（六類）的 Wi‑Fi Technology 統計")
-    
-    # 原本的統計邏輯
+    # 1️⃣ 計算各 Wi‑Fi Technology 的 AP 數（六類合併後）
     total_wifi_tech = count_wifi_tech_series(combined_df)
+    
+    # 2️⃣ 完整分佈（含 Unknown 用於對齊）
     total_wifi_full = combined_df["Wifi Technology (norm)"].value_counts()
+    
+    # 3️⃣ 轉成顯示用 DataFrame
     total_wifi_df = series_to_df_for_chart(
         total_wifi_tech,
-        "Wi‑Fi Technology",
-        "Count",
-        show_unknown,
-        total_wifi_full
+        name_col="Wi‑Fi Technology",
+        value_col="Count",
+        include_unknown=show_unknown,
+        full_series=total_wifi_full
     )
     
-    # ✅ 新增：百分比（整數、四捨五入、字串格式 xx%）— 表格
+    # 4️⃣ 計算百分比（整數、四捨五入）
     _total = int(total_wifi_df["Count"].sum())
     if _total > 0:
         total_wifi_df["Percent"] = (
@@ -1595,48 +1338,579 @@ def page_dashboard():
     else:
         total_wifi_df["Percent"] = "0%"
     
-    # （可選）整理欄位順序
-    total_wifi_df = total_wifi_df[["Wi‑Fi Technology", "Count", "Percent"]]
+    # 5️⃣ 只保留需要的欄位與順序
+    total_wifi_df = total_wifi_df[
+        ["Wi‑Fi Technology", "Count", "Percent"]
+    ]
+
+    # ✅ 新增 Total 行
+    total_row = pd.DataFrame([{
+        "Wi‑Fi Technology": "Total",
+        "Count": int(total_wifi_df["Count"].sum()),
+        "Percent": "100%" if _total > 0 else "0%"
+    }])
     
-    # 顯示表格
-    st.dataframe(total_wifi_df, use_container_width=True)
+    # 合併到表格最下面
+    total_wifi_df = pd.concat(
+        [total_wifi_df, total_row],
+        ignore_index=True
+    )
     
-    # === 新增：餅圖用整數百分比（合計=100） + 覆寫文字 ===
-    _total_pie_df = compute_pie_integer_percent(total_wifi_df, value_col="Count", out_col="PercentInt")
-    _wifi_pie_text = [f"{int(c)}，{int(p)}%" for c, p in zip(_total_pie_df["Count"], _total_pie_df["PercentInt"])]
+    # 6️⃣ 顯示表格
+    st.table(total_wifi_df)
+           
+
+    # 4. 本月總 AP（六類）的 Wi‑Fi Technology 統計餅圖
+    # =================================================================================================================================================================
+
+    # ✅ 餅圖專用 DataFrame（排除 Total）
+    total_wifi_df_pie = total_wifi_df[
+        total_wifi_df["Wi‑Fi Technology"] != "Total"
+    ]
     
-    # 餅圖沿用 Count，不需修改
+    # 1️⃣ 為餅圖計算「整數百分比」，確保加總 = 100%
+    _wifi_pie_df = compute_pie_integer_percent(
+        total_wifi_df_pie,
+        value_col="Count",
+        out_col="PercentInt"
+    )
+    
+    # 2️⃣ 組合顯示文字（例：123，45%）
+    _wifi_pie_text = [
+        f"{int(c)}，{int(p)}%"
+        for c, p in zip(
+            _wifi_pie_df["Count"],
+            _wifi_pie_df["PercentInt"]
+        )
+    ]
+    
+    # 3️⃣ 建立餅圖（沿用你系統裡的統一外觀函式）
     fig_wifi_pie = make_square_pie_12cm_overall(
-        df=total_wifi_df,
+        df=total_wifi_df_pie,
         names="Wi‑Fi Technology",
         values="Count",
         title_text="Total number of APs",
         color_col="Wi‑Fi Technology",
         color_discrete_map=COLOR_MAP,
         show_value_and_percent=True,
-        text_values=_wifi_pie_text   # ← 使用預先分配好的整數百分比文字
+        text_values=_wifi_pie_text
     )
-    center_l, center_c, center_r = st.columns([1, 2, 1])
-    with center_c:
-        st.plotly_chart(fig_wifi_pie, use_container_width=False, config=PLOTLY_CONFIG)
     
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    st.markdown("") 
-    # =========================
-    # 總 AP（六類）Vendor：表 + 「全網 AP」餅圖（僅整數百分比）
-    # =========================
-    st.markdown("### 🔹 本月總 AP（六類）的 Vendor 統計")
+    # 4️⃣ 置中顯示（和你其他餅圖一致）
+    _, center_col, _ = st.columns([1, 2, 1])
+    with center_col:
+        st.plotly_chart(
+            fig_wifi_pie,
+            use_container_width=False,
+            config=PLOTLY_CONFIG
+        )
+
+
+    # 5. Managed Wi‑Fi（四類）的 Wi‑Fi Technology 統計（表）
+    # =============================================================================================================================================================
     
+    st.markdown("## 📑 Managed Wi‑Fi（四類）的 Wi‑Fi Technology 統計")
+    
+    # 1️⃣ 計算 Managed Wi‑Fi（四類）的 Wi‑Fi Technology 分佈
+    wifi_series_mgd = count_wifi_tech_series(managed_df)
+    
+    df_wifi_mgd = (
+        wifi_series_mgd
+        .rename_axis("Wi‑Fi Technology")
+        .reset_index(name="Count")
+    )
+    
+    # 2️⃣ 計算百分比（整數，四捨五入）
+    _wifi_total = int(df_wifi_mgd["Count"].sum())
+    
+    if _wifi_total > 0:
+        df_wifi_mgd["Percent"] = (
+            (df_wifi_mgd["Count"] / _wifi_total * 100)
+            .round(0)
+            .astype(int)
+            .astype(str)
+            + "%"
+        )
+    else:
+        df_wifi_mgd["Percent"] = "0%"
+
+    # ✅ 新增 Total 行（Managed Wi‑Fi）
+    total_row_mgd = pd.DataFrame([{
+        "Wi‑Fi Technology": "Total",
+        "Count": int(df_wifi_mgd["Count"].sum()),
+        "Percent": "100%" if _wifi_total > 0 else "0%"
+    }])
+    
+    df_wifi_mgd = pd.concat(
+        [df_wifi_mgd, total_row_mgd],
+        ignore_index=True
+    )
+    
+    # 3️⃣ 顯示統計表
+    st.table(
+        df_wifi_mgd[["Wi‑Fi Technology", "Count", "Percent"]]
+    )
+
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    
+    # 6. Managed Wi‑Fi（四類）的 Wi‑Fi Technology 統計餅圖
+    # ============================================================================================================================================================
+
+    # ✅ 餅圖專用 DataFrame（排除 Total）
+    df_wifi_mgd_pie = df_wifi_mgd[
+        df_wifi_mgd["Wi‑Fi Technology"] != "Total"
+    ]
+
+    # 1️⃣ 計算餅圖用的「整數百分比」（確保合計 = 100%）
+    _mgd_pie_df = compute_pie_integer_percent(
+        df_wifi_mgd_pie,
+        value_col="Count",
+        out_col="PercentInt"
+    )
+    
+    # 2️⃣ 組合餅圖顯示文字（例如：123，45%）
+    _mgd_wifi_text = [
+        f"{int(c)}，{int(p)}%"
+        for c, p in zip(
+            _mgd_pie_df["Count"],
+            _mgd_pie_df["PercentInt"]
+        )
+    ]
+    
+    # 3️⃣ 建立餅圖（Managed 專用樣式）
+    fig_mgd_pie = make_square_pie_12cm_managed(
+        df=df_wifi_mgd_pie,
+        names="Wi‑Fi Technology",
+        values="Count",
+        title_text="Total number of APs<br>for Managed Wi‑Fi",
+        color_col="Wi‑Fi Technology",
+        color_discrete_map=COLOR_MAP,
+        show_value_and_percent=True,
+        text_values=_mgd_wifi_text
+    )
+    
+    # 4️⃣ 置中顯示（與其他餅圖一致）
+    _, center_col, _ = st.columns([1, 2, 1])
+    with center_col:
+        st.plotly_chart(
+            fig_mgd_pie,
+            use_container_width=False,
+            config=PLOTLY_CONFIG
+        )
+
+    
+    # 7. 本月 - 各分類彙總（六類）
+    # ===========================================================================================================================================================
+    
+    summary_rows = []
+    
+    for cat in CATEGORY_ORDER:
+        df_cat = df_curr6_sm[
+            df_curr6_sm["Category_site_majority"] == cat
+        ]
+    
+        site_count = df_cat["Site Code"].nunique()
+        ap_count = len(df_cat)
+    
+        wifi_counts = count_wifi_tech_series(df_cat)
+        vendor_counts = (
+            df_cat["Vendor"]
+            .value_counts()
+            .reindex(["Huawei", "Ruckus"], fill_value=0)
+        )
+    
+        summary_rows.append({
+            "Category": cat,
+            "Site Count": int(site_count),
+            "Wi‑Fi 4": int(wifi_counts.get("Wi‑Fi 4", 0)),
+            "Wi‑Fi 5": int(wifi_counts.get("Wi‑Fi 5", 0)),
+            "Wi‑Fi 6": int(wifi_counts.get("Wi‑Fi 6", 0)),
+            "Wi‑Fi 7": int(wifi_counts.get("Wi‑Fi 7", 0)),
+            "Huawei": int(vendor_counts.get("Huawei", 0)),
+            "Ruckus": int(vendor_counts.get("Ruckus", 0)),
+            "AP Count": int(ap_count),
+        })
+
+    st.markdown("## 📑 本月 - 各分類彙總（六類）")
+    
+    # 1️⃣ 將預計算好的 summary_rows 轉成 DataFrame
+    summary_df = pd.DataFrame(summary_rows)
+    
+    # 2️⃣ 欄位顯示順序（固定，避免亂序）
+    COL_ORDER = [
+        "Category",
+        "Site Count",
+        "Wi‑Fi 4",
+        "Wi‑Fi 5",
+        "Wi‑Fi 6",
+        "Wi‑Fi 7",
+        "Ruckus",
+        "Huawei",
+        "AP Count"
+    ]
+    
+    summary_df = summary_df[
+        [c for c in COL_ORDER if c in summary_df.columns]
+    ]
+
+    # ✅ 新增 Total 行（六類合計）
+    total_row = {
+        "Category": "Total",
+        "Site Count": int(summary_df["Site Count"].sum()),
+        "Wi‑Fi 4": int(summary_df["Wi‑Fi 4"].sum()),
+        "Wi‑Fi 5": int(summary_df["Wi‑Fi 5"].sum()),
+        "Wi‑Fi 6": int(summary_df["Wi‑Fi 6"].sum()),
+        "Wi‑Fi 7": int(summary_df["Wi‑Fi 7"].sum()),
+        "Huawei": int(summary_df["Huawei"].sum()),
+        "Ruckus": int(summary_df["Ruckus"].sum()),
+        "AP Count": int(summary_df["AP Count"].sum()),
+    }
+    
+    summary_df = pd.concat(
+        [summary_df, pd.DataFrame([total_row])],
+        ignore_index=True
+    )
+        
+    # 3️⃣ 顯示表格
+    st.table(summary_df)
+
+
+    # 8. 總 AP（六類）的 Wi‑Fi Technology 占比圖（橫向堆疊條）
+    # ===============================================================================================================================================================
+
+    pct_rows = []
+    
+    for cat in CATEGORY_ORDER:
+        df_cat = df_curr6_sm[
+            df_curr6_sm["Category_site_majority"] == cat
+        ]
+    
+        if df_cat.empty:
+            continue
+    
+        wifi_counts = count_wifi_tech_series(df_cat)
+    
+        for tech in WIFI_LEVELS_DISPLAY:
+            cnt = int(wifi_counts.get(tech, 0))
+            if cnt > 0:
+                pct_rows.append({
+                    "Category": cat,
+                    "Wi‑Fi Technology": tech,
+                    "Count": cnt
+                })
+    
+    
+    # 1️⃣ 將預計算好的 pct_rows 轉成 DataFrame
+    df_pct = pd.DataFrame(pct_rows)
+    
+    # 若沒有資料，直接提示
+    if df_pct.empty:
+        st.info("目前沒有六類 Wi‑Fi Technology 的占比資料可顯示。")
+    else:
+        # 2️⃣ 分類顯示名稱（不混入 Sites 數）
+        display_single_line_map = {
+            c: CATEGORY_DISPLAY_NAMES.get(c, c)
+            for c in CATEGORY_ORDER
+        }
+    
+        df_pct["Category_Display"] = df_pct["Category"].map(display_single_line_map)
+    
+        ordered_display = [display_single_line_map[c] for c in CATEGORY_ORDER]
+    
+        tech_order = WIFI_LEVELS_DISPLAY + (["Unknown"] if show_unknown else [])
+    
+        # 3️⃣ 建立橫向堆疊條圖（使用「整數百分比」前先聚合）
+        df_pct_base = (
+            df_pct
+            .groupby(
+                ["Category_Display", "Wi‑Fi Technology"],
+                as_index=False,
+                sort=False
+            )
+            .agg(Count=("Count", "sum"))
+        )
+    
+        # 4️⃣ 分配整數百分比（確保每一列加總 = 100）
+        df_pct_int = assign_integer_percent(
+            df_pct_base,
+            group_col="Category_Display",
+            count_col="Count",
+            out_col="PercentInt"
+        )
+    
+        # 5️⃣ 繪圖
+        fig_stacked = px.bar(
+            df_pct_int,
+            x="PercentInt",
+            y="Category_Display",
+            color="Wi‑Fi Technology",
+            orientation="h",
+            barmode="stack",
+            category_orders={
+                "Category_Display": ordered_display,
+                "Wi‑Fi Technology": tech_order,
+            },
+            color_discrete_map=COLOR_MAP,
+            title=None
+        )
+    
+        fig_stacked.update_traces(
+            texttemplate="%{x}%",
+            textposition="inside",
+            insidetextanchor="middle"
+        )
+    
+        # 6️⃣ 套用你全 Dashboard 共用的樣式
+        fig_stacked = apply_clean_layout(
+            fig_stacked,
+            "Distribution of Wi‑Fi Technology",
+            remove_y_title=True,
+            percent_axis=True,
+            x_domain_end=0.86,
+            right_margin=300,
+            legend_x=1.0
+        )
+    
+        # 7️⃣ 顯示
+        st.plotly_chart(
+            fig_stacked,
+            use_container_width=True,
+            config=PLOTLY_CONFIG
+        )
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+
+
+    # 9. 本月 - Managed Wi‑Fi 各分類彙總（四類）
+    # =========================================================================================================================================================
+  
+    summary_rows_managed = []
+    
+    for cat in MANAGED_GROUP_ORDER:
+        df_cat = df_curr6_sm[
+            df_curr6_sm["Category_site_majority"] == cat
+        ]
+    
+        site_count = df_cat["Site Code"].nunique()
+        ap_count = len(df_cat)
+    
+        wifi_counts = count_wifi_tech_series(df_cat)
+        vendor_counts = (
+            df_cat["Vendor"]
+            .value_counts()
+            .reindex(["Huawei", "Ruckus"], fill_value=0)
+        )
+    
+        summary_rows_managed.append({
+            # ✅ 顯示名稱在這裡換（不是 key）
+            "Category": MANAGED_GROUP_NAMES.get(cat, cat),
+            "Site Count": int(site_count),
+            "Wi‑Fi 4": int(wifi_counts.get("Wi‑Fi 4", 0)),
+            "Wi‑Fi 5": int(wifi_counts.get("Wi‑Fi 5", 0)),
+            "Wi‑Fi 6": int(wifi_counts.get("Wi‑Fi 6", 0)),
+            "Wi‑Fi 7": int(wifi_counts.get("Wi‑Fi 7", 0)),
+            "Huawei": int(vendor_counts.get("Huawei", 0)),
+            "Ruckus": int(vendor_counts.get("Ruckus", 0)),
+            "AP Count": int(ap_count),
+        })
+
+    
+    st.markdown("## 📑 本月 - Managed Wi‑Fi 各分類彙總（四類）")
+    
+    # 1️⃣ 將已預計算好的 summary_rows_managed 轉成 DataFrame
+    summary_df_managed = pd.DataFrame(summary_rows_managed)
+    
+    # 2️⃣ 欄位顯示順序（固定，避免亂序）
+    COL_ORDER_MANAGED = [
+        "Category",
+        "Site Count",
+        "Wi‑Fi 4",
+        "Wi‑Fi 5",
+        "Wi‑Fi 6",
+        "Wi‑Fi 7",
+        "Huawei",
+        "Ruckus",
+        "AP Count"
+    ]
+    
+    summary_df_managed = summary_df_managed[
+        [c for c in COL_ORDER_MANAGED if c in summary_df_managed.columns]
+    ]
+
+    # ✅ 新增 Total 行（Managed Wi‑Fi 四類合計）
+    total_row_managed = {
+        "Category": "Total",
+        "Site Count": int(summary_df_managed["Site Count"].sum()),
+        "Wi‑Fi 4": int(summary_df_managed["Wi‑Fi 4"].sum()),
+        "Wi‑Fi 5": int(summary_df_managed["Wi‑Fi 5"].sum()),
+        "Wi‑Fi 6": int(summary_df_managed["Wi‑Fi 6"].sum()),
+        "Wi‑Fi 7": int(summary_df_managed["Wi‑Fi 7"].sum()),
+        "Huawei": int(summary_df_managed["Huawei"].sum()),
+        "Ruckus": int(summary_df_managed["Ruckus"].sum()),
+        "AP Count": int(summary_df_managed["AP Count"].sum()),
+    }
+    
+    summary_df_managed = pd.concat(
+        [summary_df_managed, pd.DataFrame([total_row_managed])],
+        ignore_index=True
+    )
+    
+    # 3️⃣ 顯示表格
+    st.table(summary_df_managed)
+
+
+    # 10. Managed Wi‑Fi（四類）的 Wi‑Fi Technology 占比圖
+    # =============================================================================================================================================================
+    
+    # 1️⃣ 取出 Managed Wi‑Fi（四類）的 AP（Site‑majority 口徑）
+    managed_df = df_curr6_sm[
+        df_curr6_sm["Category_site_majority"].isin(MANAGED_ORIGINAL_CATEGORIES)
+    ].copy()
+    
+    if managed_df.empty:
+        st.info("目前沒有 Managed Wi‑Fi（四類）的 AP 可顯示。")
+    else:
+        # 2️⃣ 建立「分類 × Wi‑Fi Technology」的計數表
+        rows = []
+    
+        for cat in MANAGED_GROUP_ORDER:
+            sub = managed_df[
+                managed_df["Category_site_majority"] == cat
+            ]
+            wifi_series = count_wifi_tech_series(sub)
+    
+            for tech in WIFI_LEVELS_DISPLAY:
+                rows.append({
+                    "Category": MANAGED_GROUP_NAMES.get(cat, cat),
+                    "Wi‑Fi Technology": tech,
+                    "Count": int(wifi_series.get(tech, 0))
+                })
+    
+        df_mgd = pd.DataFrame(rows)
+    
+        # 若沒有任何 AP，直接提示
+        if df_mgd["Count"].sum() == 0:
+            st.info("Managed Wi‑Fi 分類中沒有可顯示的 Wi‑Fi Technology 資料。")
+        else:
+            # 3️⃣ 每一類內做「整數百分比」分配（確保加總 = 100）
+            df_mgd_int = assign_integer_percent(
+                df_mgd,
+                group_col="Category",
+                count_col="Count",
+                out_col="PercentInt"
+            )
+    
+            # 4️⃣ 繪製橫向堆疊條圖
+            fig_mgd = px.bar(
+                df_mgd_int,
+                x="PercentInt",
+                y="Category",
+                color="Wi‑Fi Technology",
+                orientation="h",
+                barmode="stack",
+                category_orders={
+                    "Category": [MANAGED_GROUP_NAMES[c] for c in MANAGED_GROUP_ORDER],
+                    "Wi‑Fi Technology": WIFI_LEVELS_DISPLAY
+                },
+                color_discrete_map=COLOR_MAP,
+                title=None
+            )
+    
+            fig_mgd.update_traces(
+                texttemplate="%{x}%",
+                textposition="inside",
+                insidetextanchor="middle"
+            )
+    
+            # 5️⃣ 套用全 Dashboard 共用樣式
+            fig_mgd = apply_clean_layout(
+                fig_mgd,
+                "Distribution of Wi‑Fi Technology for Managed Wi‑Fi",
+                remove_y_title=True,
+                percent_axis=True,
+                x_domain_end=0.86,
+                right_margin=300,
+                legend_x=1.0
+            )
+    
+            # 6️⃣ 顯示圖表
+            st.plotly_chart(
+                fig_mgd,
+                use_container_width=True,
+                config=PLOTLY_CONFIG
+            )
+    st.markdown("") 
+    st.markdown("") 
+    st.markdown("") 
+
+    # 🔟 Vendor 統計
+    # =============================================================================================================================================================
+        
+    # ---------------------------------------------------------
+    # 10.1 各 Wi‑Fi Technology 的品牌分佈（Huawei / Ruckus）
+    # ---------------------------------------------------------
+    
+    st.markdown("## 📘 各 Wi‑Fi Technology 的品牌分佈（Huawei / Ruckus）")
+    
+    tech_vendor_rows = []
+    
+    for tech in WIFI_LEVELS_DISPLAY:
+        sub = combined_df[combined_df["Wifi Technology (norm)"] == tech]
+        if sub.empty:
+            continue
+    
+        vc = (
+            sub["Vendor"]
+            .value_counts()
+            .reindex(["Huawei", "Ruckus"], fill_value=0)
+        )
+    
+        tech_vendor_rows.append({
+            "Wi‑Fi Technology": tech,
+            "Huawei": int(vc["Huawei"]),
+            "Ruckus": int(vc["Ruckus"]),
+            "Total": int(vc.sum())
+        })
+    
+    df_tech_vendor = pd.DataFrame(tech_vendor_rows)
+
+    # ✅ 新增 Total 行（所有 Wi‑Fi Technology 合計）
+    if not df_tech_vendor.empty:
+        total_row_vendor_wifi = {
+            "Wi‑Fi Technology": "Total",
+            "Huawei": int(df_tech_vendor["Huawei"].sum()),
+            "Ruckus": int(df_tech_vendor["Ruckus"].sum()),
+            "Total": int(df_tech_vendor["Total"].sum()),
+        }
+    
+        df_tech_vendor = pd.concat(
+            [df_tech_vendor, pd.DataFrame([total_row_vendor_wifi])],
+            ignore_index=True
+        )
+    
+    if df_tech_vendor.empty:
+        st.info("目前六類 AP 中沒有 Wi‑Fi Technology 的品牌分佈資料。")
+    else:
+        st.table(df_tech_vendor)
+
+    # ---------------------------------------------------------
+    # 10.2 本月總 AP（六類）的 Vendor（表 + 餅圖）
+    # ---------------------------------------------------------
+    
+    st.markdown("## 📊 本月總 AP（六類）的 Vendor 統計")
+    
+    # 1️⃣ Vendor 統計表
     total_vendor = (
         combined_df["Vendor"]
         .value_counts()
@@ -1649,7 +1923,6 @@ def page_dashboard():
         .reset_index(name="Count")
     )
     
-    # ✅ 計算百分比
     _total = int(total_vendor_df["Count"].sum())
     if _total > 0:
         total_vendor_df["Percent"] = (
@@ -1662,156 +1935,162 @@ def page_dashboard():
     else:
         total_vendor_df["Percent"] = "0%"
     
-    # 顯示表格
-    st.dataframe(
-        total_vendor_df[["Vendor", "Count", "Percent"]],
-        use_container_width=True
+    # ✅ 新增 Total 行（Vendor）
+    total_row_vendor = pd.DataFrame([{
+        "Vendor": "Total",
+        "Count": int(total_vendor_df["Count"].sum()),
+        "Percent": "100%" if _total > 0 else "0%"
+    }])
+    
+    total_vendor_df = pd.concat(
+        [total_vendor_df, total_row_vendor],
+        ignore_index=True
     )
     
-    # === 新增：餅圖用整數百分比（合計=100） + 覆寫文字（僅百分比） ===
-    _total_vendor_pie_df = compute_pie_integer_percent(total_vendor_df, value_col="Count", out_col="PercentInt")
-    _vendor_pie_text = [f"{int(p)}%" for p in _total_vendor_pie_df["PercentInt"]]
+    st.table(
+        total_vendor_df[["Vendor", "Count", "Percent"]]
+    )
+
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    
+    # 2️⃣ Vendor 餅圖（整數百分比）
+
+    # ✅ 餅圖專用 DataFrame（排除 Total）
+    total_vendor_df_pie = total_vendor_df[
+        total_vendor_df["Vendor"] != "Total"
+    ]
+
+    _vendor_pie_df = compute_pie_integer_percent(
+        total_vendor_df_pie,
+        value_col="Count",
+        out_col="PercentInt"
+    )
+    
+    _vendor_pie_text = [f"{int(p)}%" for p in _vendor_pie_df["PercentInt"]]
     
     fig_vendor_pie = make_square_pie_12cm_overall(
-        df=total_vendor_df,
+        df=total_vendor_df_pie,
         names="Vendor",
         values="Count",
         title_text="Brand Distribution of APs",
         color_col="Vendor",
         color_discrete_map=COLOR_MAP,
-        show_value_and_percent=False,  # 僅整數百分比
-        text_values=_vendor_pie_text   # ← 使用預先分配好的整數百分比文字
+        show_value_and_percent=False,
+        text_values=_vendor_pie_text
     )
-    center_l, center_c, center_r = st.columns([1, 2, 1])
-    with center_c:
-        st.plotly_chart(fig_vendor_pie, use_container_width=False, config=PLOTLY_CONFIG)
     
-    # =========================
-    # 按 Wi‑Fi Technology 分的品牌分佈（表 + 堆疊條）
-    # =========================
-    st.subheader("📘 各 Wi‑Fi Technology 的品牌分佈（Huawei / Ruckus）")
-    tech_vendor_rows = []
-    for tech in WIFI_LEVELS_DISPLAY:
-        sub = combined_df[combined_df["Wifi Technology (norm)"] == tech]
-        if sub.empty: continue
-        vc = sub["Vendor"].value_counts().reindex(["Huawei","Ruckus"], fill_value=0)
-        tech_vendor_rows.append({"Wi‑Fi Technology":tech, "Huawei":int(vc["Huawei"]), "Ruckus":int(vc["Ruckus"]), "Total":int(vc.sum())})
-    df_tech_vendor = pd.DataFrame(tech_vendor_rows)
-    if df_tech_vendor.empty:
-        st.info("目前六類資料中沒有 Wi‑Fi 4/5/6/7 的 AP。")
+    _, c, _ = st.columns([1, 2, 1])
+    with c:
+        st.plotly_chart(
+            fig_vendor_pie,
+            use_container_width=False,
+            config=PLOTLY_CONFIG
+        )
+
+    # ---------------------------------------------------------
+    # 10.3 Managed Wi‑Fi Vendor（表 + 餅圖）
+    # ---------------------------------------------------------
+    
+    st.markdown("## 📊 Managed Wi‑Fi Vendor 統計")
+    
+    # 1️⃣ Vendor 統計表（Managed）
+    vendor_series_mgd = (
+        managed_df["Vendor"]
+        .value_counts()
+        .reindex(["Huawei", "Ruckus"], fill_value=0)
+    )
+    
+    df_vendor_mgd = (
+        vendor_series_mgd
+        .rename_axis("Vendor")
+        .reset_index(name="Count")
+    )
+    
+    _total_mgd = int(df_vendor_mgd["Count"].sum())
+    if _total_mgd > 0:
+        df_vendor_mgd["Percent"] = (
+            (df_vendor_mgd["Count"] / _total_mgd * 100)
+            .round(0)
+            .astype(int)
+            .astype(str)
+            + "%"
+        )
     else:
-        st.dataframe(df_tech_vendor, use_container_width=True)
-        df_tv_plot = df_tech_vendor.melt(id_vars=["Wi‑Fi Technology","Total"], value_vars=["Huawei","Ruckus"],
-                                         var_name="Vendor", value_name="Count")
-        fig_tv = px.bar(df_tv_plot, x="Count", y="Wi‑Fi Technology", color="Vendor",
-                        orientation="h", barmode="stack", color_discrete_map=COLOR_MAP,
-                        title=None, text="Count")
-        fig_tv.update_traces(textposition="inside")
-        fig_tv = apply_clean_layout(fig_tv, "AP Vendor Breakdown within each Wi‑Fi Technology", remove_y_title=False, percent_axis=False)
-        st.plotly_chart(fig_tv, use_container_width=True, config=PLOTLY_CONFIG)
+        df_vendor_mgd["Percent"] = "0%"
+
+    # ✅ 新增 Total 行（Managed Wi‑Fi Vendor）
+    total_row_vendor_mgd = pd.DataFrame([{
+        "Vendor": "Total",
+        "Count": int(df_vendor_mgd["Count"].sum()),
+        "Percent": "100%" if _total_mgd > 0 else "0%"
+    }])
     
+    df_vendor_mgd = pd.concat(
+        [df_vendor_mgd, total_row_vendor_mgd],
+        ignore_index=True
+    )
     
-        st.markdown("") 
-        st.markdown("") 
-    # =========================
+    st.table(
+        df_vendor_mgd[["Vendor", "Count", "Percent"]]
+    )
     
-        # 1) Managed — 統計表
-        st.markdown("### 📑 Managed Wi‑Fi 統計表")
+    # 2️⃣ Vendor 餅圖（Managed）
+
+    # ✅ 餅圖專用 DataFrame（排除 Total）
+    df_vendor_mgd_pie = df_vendor_mgd[
+        df_vendor_mgd["Vendor"] != "Total"
+    ]
+
+    _mgd_vendor_pie_df = compute_pie_integer_percent(
+        df_vendor_mgd_pie,
+        value_col="Count",
+        out_col="PercentInt"
+    )
     
-        wifi_series_mgd = count_wifi_tech_series(managed_df)
-        df_wifi_mgd = (
-            wifi_series_mgd
-            .rename_axis("Wi‑Fi Technology")
-            .reset_index(name="Count")
+    _mgd_vendor_text = [f"{int(p)}%" for p in _mgd_vendor_pie_df["PercentInt"]]
+    
+    fig_vendor_mgd = make_square_pie_12cm_managed(
+        df=df_vendor_mgd_pie,
+        names="Vendor",
+        values="Count",
+        title_text="Brand Distribution of APs<br>for Managed Wi‑Fi",
+        color_col="Vendor",
+        color_discrete_map=COLOR_MAP,
+        show_value_and_percent=False,
+        text_values=_mgd_vendor_text
+    )
+    
+    _, c, _ = st.columns([1, 2, 1])
+    with c:
+        st.plotly_chart(
+            fig_vendor_mgd,
+            use_container_width=False,
+            config=PLOTLY_CONFIG
         )
-    
-        # ✅ 計算百分比
-        _wifi_total = int(df_wifi_mgd["Count"].sum())
-        if _wifi_total > 0:
-            df_wifi_mgd["Percent"] = (
-                (df_wifi_mgd["Count"] / _wifi_total * 100)
-                .round(0)
-                .astype(int)
-                .astype(str)
-                + "%"
-            )
-        else:
-            df_wifi_mgd["Percent"] = "0%"
-    
-        st.markdown("**Wi‑Fi Technology 統計**")
-        st.dataframe(
-            df_wifi_mgd[["Wi‑Fi Technology", "Count", "Percent"]],
-            use_container_width=True
-        )
-    
-        vendor_series_mgd = (
-            managed_df["Vendor"]
-            .value_counts()
-            .reindex(["Huawei", "Ruckus"], fill_value=0)
-        )
-    
-        df_vendor_mgd = (
-            vendor_series_mgd
-            .rename_axis("Vendor")
-            .reset_index(name="Count")
-        )
-    
-        # ✅ 計算百分比
-        _vendor_total = int(df_vendor_mgd["Count"].sum())
-        if _vendor_total > 0:
-            df_vendor_mgd["Percent"] = (
-                (df_vendor_mgd["Count"] / _vendor_total * 100)
-                .round(0)
-                .astype(int)
-                .astype(str)
-                + "%"
-            )
-        else:
-            df_vendor_mgd["Percent"] = "0%"
-    
-        st.markdown("**Vendor 統計**")
-        st.dataframe(
-            df_vendor_mgd[["Vendor", "Count", "Percent"]],
-            use_container_width=True
-        )
-        
-        # 2) Managed — Wi‑Fi Technology 餅圖（數量，整數百分比）
-        # === 新增：餅圖用整數百分比（合計=100） + 覆寫文字 ===
-        _mgd_pie_df = compute_pie_integer_percent(df_wifi_mgd, value_col="Count", out_col="PercentInt")
-        _mgd_wifi_text = [f"{int(c)}，{int(p)}%" for c, p in zip(_mgd_pie_df["Count"], _mgd_pie_df["PercentInt"])]
-    
-        fig_mgd_pie = make_square_pie_12cm_managed(
-            df=df_wifi_mgd,
-            names="Wi‑Fi Technology",
-            values="Count",
-            title_text="Total number of APs<br>for Managed Wi‑Fi",
-            color_col="Wi‑Fi Technology",
-            color_discrete_map=COLOR_MAP,
-            show_value_and_percent=True,
-            text_values=_mgd_wifi_text   # ← 使用預先分配好的整數百分比文字
-        )
-        center_l, center_c, center_r = st.columns([1, 2, 1])
-        with center_c:
-            st.plotly_chart(fig_mgd_pie, use_container_width=False, config=PLOTLY_CONFIG)
-    
-        # 3) Managed — Vendor 餅圖（僅整數百分比）
-        # === 新增：餅圖用整數百分比（合計=100） + 覆寫文字（僅百分比） ===
-        _mgd_vendor_pie_df = compute_pie_integer_percent(df_vendor_mgd, value_col="Count", out_col="PercentInt")
-        _mgd_vendor_text = [f"{int(p)}%" for p in _mgd_vendor_pie_df["PercentInt"]]
-    
-        fig_vendor_mgd = make_square_pie_12cm_managed(
-            df=df_vendor_mgd,
-            names="Vendor",
-            values="Count",
-            title_text="Brand Distribution of APs<br>for Managed Wi‑Fi",
-            color_col="Vendor",
-            color_discrete_map=COLOR_MAP,
-            show_value_and_percent=False,
-            text_values=_mgd_vendor_text   # ← 使用預先分配好的整數百分比文字
-        )
-        center_l, center_c, center_r = st.columns([1, 2, 1])
-        with center_c:
-            st.plotly_chart(fig_vendor_mgd, use_container_width=False, config=PLOTLY_CONFIG)
+
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+    st.markdown("")
+
     
     # =========================
     # 月度差異（本月 vs 上月）— 保留原功能
@@ -1849,11 +2128,13 @@ def page_dashboard():
                     added_sites_all = sorted(list(sites_curr - sites_prev))
                     removed_sites_all = sorted(list(sites_prev - sites_curr))
     
-                    ap_curr_by_site = df_curr6.groupby("Site Code").size()
-                    ap_prev_by_site = df_prev6.groupby("Site Code").size()
-    
-                    cat_curr_by_site = site_category_majority(df_curr6)
-                    cat_prev_by_site = site_category_majority(df_prev6)
+                    ap_curr_by_site = df_curr6_sm.groupby("Site Code").size()
+                    ap_prev_by_site = (
+                        df_prev6
+                        .assign(Category_site_majority=lambda x: x["Site Code"].map(cat_prev_by_site))
+                        .groupby("Site Code")
+                        .size()
+                    )
     
                     name_curr_by_site = df_curr6.groupby("Site Code")["Hotspot Name (Chinese)"].first().to_dict()
                     name_prev_by_site = df_prev6.groupby("Site Code")["Hotspot Name (Chinese)"].first().to_dict()
@@ -1874,8 +2155,14 @@ def page_dashboard():
                                 "上月 AP 數（六類）": prev_ap,
                                 "本月 AP 數（六類）": curr_ap,
                                 "Δ AP": curr_ap - prev_ap,
-                                "上月類型": cat_prev_by_site.get(s,"-"),
-                                "本月類型": cat_curr_by_site.get(s,"-")
+                                "上月類型": CATEGORY_DISPLAY_NAMES.get(
+                                    cat_prev_by_site.get(s,"-"),
+                                    cat_prev_by_site.get(s,"-")
+                                ),
+                                "本月類型": CATEGORY_DISPLAY_NAMES.get(
+                                    cat_curr_by_site.get(s,"-"),
+                                    cat_curr_by_site.get(s,"-")
+                                )
                             })
                         return pd.DataFrame(rows)
     
@@ -1914,8 +2201,18 @@ def page_dashboard():
                         df_sites["上月 AP 數（六類）"] = df_sites["Site Code"].map(lambda s: int(ap_prev_by_site.get(s,0)))
                         df_sites["本月 AP 數（六類）"] = df_sites["Site Code"].map(lambda s: int(ap_curr_by_site.get(s,0)))
                         df_sites["Δ AP"] = df_sites["本月 AP 數（六類）"] - df_sites["上月 AP 數（六類）"]
-                        df_sites["上月類型"] = df_sites["Site Code"].map(lambda s: cat_prev_by_site.get(s,"-"))
-                        df_sites["本月類型"] = df_sites["Site Code"].map(lambda s: cat_curr_by_site.get(s,"-"))
+                        df_sites["上月類型"] = df_sites["Site Code"].map(
+                            lambda s: CATEGORY_DISPLAY_NAMES.get(
+                                cat_prev_by_site.get(s,"-"),
+                                cat_prev_by_site.get(s,"-")
+                            )
+                        )
+                        df_sites["本月類型"] = df_sites["Site Code"].map(
+                            lambda s: CATEGORY_DISPLAY_NAMES.get(
+                                cat_curr_by_site.get(s,"-"),
+                                cat_curr_by_site.get(s,"-")
+                            )
+                        )
                         df_sites["Hotspot Name (Chinese)（上月）"] = df_sites["Site Code"].map(lambda s: name_prev_by_site.get(s,"-"))
                         df_sites["Hotspot Name (Chinese)（本月）"] = df_sites["Site Code"].map(lambda s: name_curr_by_site.get(s,"-"))
                         return df_sites
@@ -2001,7 +2298,7 @@ def page_dashboard():
                     st.markdown("### ➖ 移除站點（六類；上月有、本月無）")
                     st.dataframe(removed_sites_df, use_container_width=True)
                     st.markdown(f"- 移除站點 **AP 總減量（六類）**：{int(removed_sites_df['上月 AP 數（六類）'].sum())}")
-                    st.markdown("") 
+
                     st.markdown("") 
                     st.markdown("") 
                     st.markdown("") 
@@ -2019,48 +2316,79 @@ def page_dashboard():
                         st.dataframe(moved_sites_df, use_container_width=True)
     
     
-                    st.subheader("⬇️ 差異結果下載（只含六類）")
+                    st.subheader("⬇️ 結果下載")
                     excel_bio = io.BytesIO()
+                    
                     with pd.ExcelWriter(excel_bio, engine="openpyxl") as writer:
-                        summary_df.to_excel(writer, index=False, sheet_name="本月_各分類彙總_六類")
-                        total_wifi_df.to_excel(writer, index=False, sheet_name="本月_total_wifi_六類")
-                        total_vendor_df.to_excel(writer, index=False, sheet_name="本月_total_vendor_六類")
+                    
+                        # ✅ ✅ ✅ 關鍵：先建立一張保證存在的 sheet
+                        pd.DataFrame(
+                            [{"INFO": "SYSTEM INIT"}]
+                        ).to_excel(
+                            writer,
+                            index=False,
+                            sheet_name="_INIT"
+                        )
+                    
+                        # ---------- 本月彙總 ----------
+                        if summary_df is not None and not summary_df.empty:
+                            summary_df.to_excel(
+                                writer, index=False, sheet_name="本月_各分類彙總_六類"
+                            )
+                    
+                        if total_wifi_df is not None and not total_wifi_df.empty:
+                            total_wifi_df.to_excel(
+                                writer, index=False, sheet_name="本月_total_wifi_六類"
+                            )
+                    
+                        if total_vendor_df is not None and not total_vendor_df.empty:
+                            total_vendor_df.to_excel(
+                                writer, index=False, sheet_name="本月_total_vendor_六類"
+                            )
+                    
+                        # ---------- 各分類明細（六類） ----------
                         for name in CATEGORY_ORDER:
-                            per_category_wifi_tables[name].to_excel(writer, index=False, sheet_name=f"本月_{name[:24]}_wifi")
-                            per_category_vendor_tables[name].to_excel(writer, index=False, sheet_name=f"本月_{name[:24]}_vendor")
-                        added_sites_df.to_excel(writer, index=False, sheet_name="差異_新增站點_六類")
-                        removed_sites_df.to_excel(writer, index=False, sheet_name="差異_移除站點_六類")
-                        changed_sites_df.to_excel(writer, index=False, sheet_name="差異_AP變動_六類")
-                        if not moved_sites_df.empty:
-                            moved_sites_df.to_excel(writer, index=False, sheet_name="差異_類型變更站點_六類")
-                        safe_cols = [c for c in ["Site Code","Hotspot Name (Chinese)","Wifi Technology (norm)","Vendor","Category"] if c in df_curr6.columns]
-                        df_curr6[safe_cols].to_excel(writer, index=False, sheet_name="本月_明細_六類")
-                        df_prev6[safe_cols].to_excel(writer, index=False, sheet_name="上月_明細_六類")
+                            df_wifi = per_category_wifi_tables.get(name)
+                            df_vendor = per_category_vendor_tables.get(name)
+                    
+                            if df_wifi is not None and not df_wifi.empty:
+                                df_wifi.to_excel(
+                                    writer, index=False, sheet_name=f"本月_{name[:24]}_wifi"
+                                )
+                    
+                            if df_vendor is not None and not df_vendor.empty:
+                                df_vendor.to_excel(
+                                    writer, index=False, sheet_name=f"本月_{name[:24]}_vendor"
+                                )
+                    
+                        # ---------- 差異分析 ----------
+                        if added_sites_df is not None and not added_sites_df.empty:
+                            added_sites_df.to_excel(
+                                writer, index=False, sheet_name="差異_新增站點_六類"
+                            )
+                    
+                        if removed_sites_df is not None and not removed_sites_df.empty:
+                            removed_sites_df.to_excel(
+                                writer, index=False, sheet_name="差異_移除站點_六類"
+                            )
+                    
+                        if changed_sites_df is not None and not changed_sites_df.empty:
+                            changed_sites_df.to_excel(
+                                writer, index=False, sheet_name="差異_AP變動_六類"
+                            )
+                    
+                        if moved_sites_df is not None and not moved_sites_df.empty:
+                            moved_sites_df.to_excel(
+                                writer, index=False, sheet_name="差異_類型變更站點_六類"
+                            )
+                    
                     excel_bio.seek(0)
                     st.download_button(
                         "下載【月度差異 + 本月彙總】Excel（只含六類）",
-                        excel_bio, "wifi_ap_monthly_diff_6cats.xlsx",
+                        excel_bio,
+                        "wifi_ap_monthly_diff_6cats.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
-    
-    # =========================
-    # 單檔輸出：本月彙總（六類）
-    # =========================
-    st.subheader("⬇️ 本月彙總下載（六類）")
-    excel_bio_single = io.BytesIO()
-    with pd.ExcelWriter(excel_bio_single, engine="openpyxl") as writer:
-        summary_df.to_excel(writer, index=False, sheet_name="summary_六類")
-        total_wifi_df.to_excel(writer, index=False, sheet_name="total_wifi_六類")
-        total_vendor_df.to_excel(writer, index=False, sheet_name="total_vendor_六類")
-    excel_bio_single.seek(0)
-    st.download_button(
-        "下載本月彙總 Excel（六類）",
-        excel_bio_single, "wifi_ap_current_summary_6cats.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    
-    st.success("完成！")
-
 
 # =================================================
 # 4️⃣ ✅ 查詢頁（你剛剛貼的這一整段）
