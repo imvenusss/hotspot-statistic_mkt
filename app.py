@@ -593,46 +593,32 @@ def page_dashboard():
     )
 
 
-    # ✅ 全域 CSS（調整 dataframe 字體大小）
     st.markdown(
         """
         <style>
-        div[data-testid="stDataFrame"] td {
-            font-size: 22px;
-        }
-        div[data-testid="stDataFrame"] th {
-            font-size: 22px;
-            font-weight: 600;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        """
-        <style>
-        /* ─────────────────────────────
-           ✅ 只影響 st.table（Summary / Vendor / Wi‑Fi 表）
-           ✅ 不影響 hotspot statistic（自訂 HTML）
+        /* ==============================
+           ✅ 只影響 st.table
+           ✅ 不影響 hotspot statistic
            ✅ 不影響 st.dataframe
-           ───────────────────────────── */
+           ============================== */
     
-        /* 所有 st.table 的儲存格一律靠左 */
+        /* st.table 全體字體與對齊 */
+        div[data-testid="stTable"] table th,
         div[data-testid="stTable"] table td {
+            font-size: 22px;          /* ← 想再調只改這裡 */
             text-align: left !important;
+            padding: 6px;
         }
     
-        /* 表頭也統一靠左 */
+        /* 表頭樣式 */
         div[data-testid="stTable"] table th {
-            text-align: left !important;
             font-weight: 600;
         }
     
-        /* 首欄（Category / Vendor / Wi‑Fi Technology）額外加粗 */
+        /* ✅ 第一欄（Category / Vendor / Wi‑Fi Technology） */
         div[data-testid="stTable"] table td:first-child {
-            font-weight: 600;
-            color: #000;
+            font-weight: 700;
+            color: #000000;
         }
         </style>
         """,
@@ -1508,6 +1494,10 @@ def page_dashboard():
     
     # 7. 本月 - 各分類彙總（六類）
     # ===========================================================================================================================================================
+    TABLE_CATEGORY_OVERRIDE = {
+        "Ferry WiFi": "Ferry",
+        "Limo WiFi": "Limo / Shuttle",
+    }
     
     summary_rows = []
     
@@ -1525,9 +1515,10 @@ def page_dashboard():
             .value_counts()
             .reindex(["Huawei", "Ruckus"], fill_value=0)
         )
-    
+
+        
         summary_rows.append({
-            "Category": cat,
+            "Category": TABLE_CATEGORY_OVERRIDE.get(cat, cat),
             "Site Count": int(site_count),
             "Wi‑Fi 4": int(wifi_counts.get("Wi‑Fi 4", 0)),
             "Wi‑Fi 5": int(wifi_counts.get("Wi‑Fi 5", 0)),
