@@ -1216,6 +1216,8 @@ def page_dashboard():
     # ✅ KPI 數值
     total_ap_all = len(combined_df)
     
+    site_per_row = combined_df[["Site Code", "Wifi Technology (norm)", "Vendor"]].copy()
+
     managed_df = df_curr6_sm[
         df_curr6_sm["Category_site_majority"].isin(MANAGED_ORIGINAL_CATEGORIES)
     ].copy()
@@ -1310,11 +1312,28 @@ def page_dashboard():
         include_unknown=show_unknown,
         full_series=total_wifi_full
     )
+
+
+    # ✅ 加 Site Count（六類）
+    site_counts_wifi = (
+        combined_df
+        .groupby("Wifi Technology (norm)")["Site Code"]
+        .nunique()
+    )
+    
+    total_wifi_df["Site Count"] = (
+        total_wifi_df["Wi‑Fi Technology"]
+        .map(site_counts_wifi)
+        .fillna(0)
+        .astype(int)
+    )
+
     
     # 4️⃣ 計算百分比（整數、四捨五入）
     _total = int(total_wifi_df["Count"].sum())
+    
     if _total > 0:
-        total_wifi_df["Percent"] = (
+        total_wifi_df["Percent(AP)"] = (
             (total_wifi_df["Count"] / _total * 100)
             .round(0)
             .astype(int)
@@ -1322,30 +1341,36 @@ def page_dashboard():
             + "%"
         )
     else:
-        total_wifi_df["Percent"] = "0%"
+        total_wifi_df["Percent(AP)"] = "0%"
     
-    # 5️⃣ 只保留需要的欄位與順序
+    # ✅ 先 rename（避免後續用錯欄位）
+    total_wifi_df = total_wifi_df.rename(columns={
+        "Count": "AP Count"
+    })
+    
+    # ✅ 再排欄位
     total_wifi_df = total_wifi_df[
-        ["Wi‑Fi Technology", "Count", "Percent"]
+        ["Wi‑Fi Technology", "Site Count", "AP Count", "Percent(AP)"]
     ]
-
-    # ✅ 新增 Total 行
+    
+    # ✅ Total 行
     total_row = pd.DataFrame([{
         "Wi‑Fi Technology": "Total",
-        "Count": int(total_wifi_df["Count"].sum()),
-        "Percent": "100%" if _total > 0 else "0%"
+        "Site Count": int(combined_df["Site Code"].nunique()),
+        "AP Count": int(total_wifi_df["AP Count"].sum()),
+        "Percent(AP)": "100%" if _total > 0 else "0%"
     }])
     
-    # 合併到表格最下面
+    # ✅ 合併
     total_wifi_df = pd.concat(
         [total_wifi_df, total_row],
         ignore_index=True
     )
     
-    # 6️⃣ 顯示表格
-    st.table(total_wifi_df)
+    # ✅ 顯示
+    st.dataframe(total_wifi_df, use_container_width=True)
+    
            
-
     # 4. 本月總 AP（六類）的 Wi‑Fi Technology 統計餅圖
     # =================================================================================================================================================================
 
@@ -1357,7 +1382,7 @@ def page_dashboard():
     # 1️⃣ 為餅圖計算「整數百分比」，確保加總 = 100%
     _wifi_pie_df = compute_pie_integer_percent(
         total_wifi_df_pie,
-        value_col="Count",
+        value_col="AP Count",
         out_col="PercentInt"
     )
     
@@ -1365,7 +1390,7 @@ def page_dashboard():
     _wifi_pie_text = [
         f"{int(c)}，{int(p)}%"
         for c, p in zip(
-            _wifi_pie_df["Count"],
+            _wifi_pie_df["AP Count"],
             _wifi_pie_df["PercentInt"]
         )
     ]
@@ -1374,7 +1399,7 @@ def page_dashboard():
     fig_wifi_pie = make_square_pie_12cm_overall(
         df=total_wifi_df_pie,
         names="Wi‑Fi Technology",
-        values="Count",
+        values="AP Count",
         title_text="Total number of APs",
         color_col="Wi‑Fi Technology",
         color_discrete_map=COLOR_MAP,
@@ -1406,11 +1431,25 @@ def page_dashboard():
         .reset_index(name="Count")
     )
     
-    # 2️⃣ 計算百分比（整數，四捨五入）
+    # ✅ 加 Site Count（你之前已做，這裡補完整）
+    site_counts_wifi_mgd = (
+        managed_df
+        .groupby("Wifi Technology (norm)")["Site Code"]
+        .nunique()
+    )
+    
+    df_wifi_mgd["Site Count"] = (
+        df_wifi_mgd["Wi‑Fi Technology"]
+        .map(site_counts_wifi_mgd)
+        .fillna(0)
+        .astype(int)
+    )
+    
+    # 2️⃣ 計算百分比
     _wifi_total = int(df_wifi_mgd["Count"].sum())
     
     if _wifi_total > 0:
-        df_wifi_mgd["Percent"] = (
+        df_wifi_mgd["Percent(AP)"] = (
             (df_wifi_mgd["Count"] / _wifi_total * 100)
             .round(0)
             .astype(int)
@@ -1418,13 +1457,24 @@ def page_dashboard():
             + "%"
         )
     else:
-        df_wifi_mgd["Percent"] = "0%"
-
-    # ✅ 新增 Total 行（Managed Wi‑Fi）
+        df_wifi_mgd["Percent(AP)"] = "0%"
+    
+    # ✅ 3️⃣ 先 rename（重要‼️）
+    df_wifi_mgd = df_wifi_mgd.rename(columns={
+        "Count": "AP Count"
+    })
+    
+    # ✅ 4️⃣ 重排欄位順序（避免亂）
+    df_wifi_mgd = df_wifi_mgd[
+        ["Wi‑Fi Technology", "Site Count", "AP Count", "Percent(AP)"]
+    ]
+    
+    # ✅ 5️⃣ Total 行
     total_row_mgd = pd.DataFrame([{
         "Wi‑Fi Technology": "Total",
-        "Count": int(df_wifi_mgd["Count"].sum()),
-        "Percent": "100%" if _wifi_total > 0 else "0%"
+        "Site Count": int(managed_df["Site Code"].nunique()),
+        "AP Count": int(df_wifi_mgd["AP Count"].sum()),
+        "Percent(AP)": "100%" if _wifi_total > 0 else "0%"
     }])
     
     df_wifi_mgd = pd.concat(
@@ -1432,9 +1482,10 @@ def page_dashboard():
         ignore_index=True
     )
     
-    # 3️⃣ 顯示統計表
-    st.table(
-        df_wifi_mgd[["Wi‑Fi Technology", "Count", "Percent"]]
+    # ✅ 6️⃣ 顯示
+    st.dataframe(
+        df_wifi_mgd,
+        use_container_width=True
     )
 
     st.markdown("")
@@ -1457,7 +1508,7 @@ def page_dashboard():
     # 1️⃣ 計算餅圖用的「整數百分比」（確保合計 = 100%）
     _mgd_pie_df = compute_pie_integer_percent(
         df_wifi_mgd_pie,
-        value_col="Count",
+        value_col="AP Count",
         out_col="PercentInt"
     )
     
@@ -1465,7 +1516,7 @@ def page_dashboard():
     _mgd_wifi_text = [
         f"{int(c)}，{int(p)}%"
         for c, p in zip(
-            _mgd_pie_df["Count"],
+            _mgd_pie_df["AP Count"],
             _mgd_pie_df["PercentInt"]
         )
     ]
@@ -1474,7 +1525,7 @@ def page_dashboard():
     fig_mgd_pie = make_square_pie_12cm_managed(
         df=df_wifi_mgd_pie,
         names="Wi‑Fi Technology",
-        values="Count",
+        values="AP Count",
         title_text="Total number of APs<br>for Managed Wi‑Fi",
         color_col="Wi‑Fi Technology",
         color_discrete_map=COLOR_MAP,
@@ -1520,12 +1571,12 @@ def page_dashboard():
         summary_rows.append({
             "Category": TABLE_CATEGORY_OVERRIDE.get(cat, cat),
             "Site Count": int(site_count),
-            "Wi‑Fi 4": int(wifi_counts.get("Wi‑Fi 4", 0)),
-            "Wi‑Fi 5": int(wifi_counts.get("Wi‑Fi 5", 0)),
-            "Wi‑Fi 6": int(wifi_counts.get("Wi‑Fi 6", 0)),
-            "Wi‑Fi 7": int(wifi_counts.get("Wi‑Fi 7", 0)),
-            "Huawei": int(vendor_counts.get("Huawei", 0)),
-            "Ruckus": int(vendor_counts.get("Ruckus", 0)),
+            "Wi‑Fi 4 AP": int(wifi_counts.get("Wi‑Fi 4", 0)),
+            "Wi‑Fi 5 AP": int(wifi_counts.get("Wi‑Fi 5", 0)),
+            "Wi‑Fi 6 AP": int(wifi_counts.get("Wi‑Fi 6", 0)),
+            "Wi‑Fi 7 AP": int(wifi_counts.get("Wi‑Fi 7", 0)),
+            "Huawei AP": int(vendor_counts.get("Huawei", 0)),
+            "Ruckus AP": int(vendor_counts.get("Ruckus", 0)),
             "AP Count": int(ap_count),
         })
 
@@ -1538,12 +1589,12 @@ def page_dashboard():
     COL_ORDER = [
         "Category",
         "Site Count",
-        "Wi‑Fi 4",
-        "Wi‑Fi 5",
-        "Wi‑Fi 6",
-        "Wi‑Fi 7",
-        "Ruckus",
-        "Huawei",
+        "Wi‑Fi 4 AP",
+        "Wi‑Fi 5 AP",
+        "Wi‑Fi 6 AP",
+        "Wi‑Fi 7 AP",
+        "Ruckus AP",
+        "Huawei AP",
         "AP Count"
     ]
     
@@ -1555,12 +1606,12 @@ def page_dashboard():
     total_row = {
         "Category": "Total",
         "Site Count": int(summary_df["Site Count"].sum()),
-        "Wi‑Fi 4": int(summary_df["Wi‑Fi 4"].sum()),
-        "Wi‑Fi 5": int(summary_df["Wi‑Fi 5"].sum()),
-        "Wi‑Fi 6": int(summary_df["Wi‑Fi 6"].sum()),
-        "Wi‑Fi 7": int(summary_df["Wi‑Fi 7"].sum()),
-        "Huawei": int(summary_df["Huawei"].sum()),
-        "Ruckus": int(summary_df["Ruckus"].sum()),
+        "Wi‑Fi 4 AP": int(summary_df["Wi‑Fi 4 AP"].sum()),
+        "Wi‑Fi 5 AP": int(summary_df["Wi‑Fi 5 AP"].sum()),
+        "Wi‑Fi 6 AP": int(summary_df["Wi‑Fi 6 AP"].sum()),
+        "Wi‑Fi 7 AP": int(summary_df["Wi‑Fi 7 AP"].sum()),
+        "Huawei AP": int(summary_df["Huawei AP"].sum()),
+        "Ruckus AP": int(summary_df["Ruckus AP"].sum()),
         "AP Count": int(summary_df["AP Count"].sum()),
     }
     
@@ -1570,7 +1621,7 @@ def page_dashboard():
     )
         
     # 3️⃣ 顯示表格
-    st.table(summary_df)
+    st.dataframe(summary_df, use_container_width=True)
 
 
     # 8. 總 AP（六類）的 Wi‑Fi Technology 占比圖（橫向堆疊條）
@@ -1704,19 +1755,17 @@ def page_dashboard():
         )
     
         summary_rows_managed.append({
-            # ✅ 顯示名稱在這裡換（不是 key）
             "Category": MANAGED_GROUP_NAMES.get(cat, cat),
             "Site Count": int(site_count),
-            "Wi‑Fi 4": int(wifi_counts.get("Wi‑Fi 4", 0)),
-            "Wi‑Fi 5": int(wifi_counts.get("Wi‑Fi 5", 0)),
-            "Wi‑Fi 6": int(wifi_counts.get("Wi‑Fi 6", 0)),
-            "Wi‑Fi 7": int(wifi_counts.get("Wi‑Fi 7", 0)),
-            "Huawei": int(vendor_counts.get("Huawei", 0)),
-            "Ruckus": int(vendor_counts.get("Ruckus", 0)),
+            "Wi‑Fi 4 AP": int(wifi_counts.get("Wi‑Fi 4", 0)),
+            "Wi‑Fi 5 AP": int(wifi_counts.get("Wi‑Fi 5", 0)),
+            "Wi‑Fi 6 AP": int(wifi_counts.get("Wi‑Fi 6", 0)),
+            "Wi‑Fi 7 AP": int(wifi_counts.get("Wi‑Fi 7", 0)),
+            "Huawei AP": int(vendor_counts.get("Huawei", 0)),
+            "Ruckus AP": int(vendor_counts.get("Ruckus", 0)),
             "AP Count": int(ap_count),
         })
 
-    
     st.markdown("## 📑 本月 - Managed Wi‑Fi 各分類彙總（四類）")
     
     # 1️⃣ 將已預計算好的 summary_rows_managed 轉成 DataFrame
@@ -1726,12 +1775,12 @@ def page_dashboard():
     COL_ORDER_MANAGED = [
         "Category",
         "Site Count",
-        "Wi‑Fi 4",
-        "Wi‑Fi 5",
-        "Wi‑Fi 6",
-        "Wi‑Fi 7",
-        "Huawei",
-        "Ruckus",
+        "Wi‑Fi 4 AP",
+        "Wi‑Fi 5 AP",
+        "Wi‑Fi 6 AP",
+        "Wi‑Fi 7 AP",
+        "Ruckus AP",
+        "Huawei AP",
         "AP Count"
     ]
     
@@ -1743,12 +1792,15 @@ def page_dashboard():
     total_row_managed = {
         "Category": "Total",
         "Site Count": int(summary_df_managed["Site Count"].sum()),
-        "Wi‑Fi 4": int(summary_df_managed["Wi‑Fi 4"].sum()),
-        "Wi‑Fi 5": int(summary_df_managed["Wi‑Fi 5"].sum()),
-        "Wi‑Fi 6": int(summary_df_managed["Wi‑Fi 6"].sum()),
-        "Wi‑Fi 7": int(summary_df_managed["Wi‑Fi 7"].sum()),
-        "Huawei": int(summary_df_managed["Huawei"].sum()),
-        "Ruckus": int(summary_df_managed["Ruckus"].sum()),
+    
+        "Wi‑Fi 4 AP": int(summary_df_managed["Wi‑Fi 4 AP"].sum()),
+        "Wi‑Fi 5 AP": int(summary_df_managed["Wi‑Fi 5 AP"].sum()),
+        "Wi‑Fi 6 AP": int(summary_df_managed["Wi‑Fi 6 AP"].sum()),
+        "Wi‑Fi 7 AP": int(summary_df_managed["Wi‑Fi 7 AP"].sum()),
+    
+        "Huawei AP": int(summary_df_managed["Huawei AP"].sum()),
+        "Ruckus AP": int(summary_df_managed["Ruckus AP"].sum()),
+    
         "AP Count": int(summary_df_managed["AP Count"].sum()),
     }
     
@@ -1758,7 +1810,7 @@ def page_dashboard():
     )
     
     # 3️⃣ 顯示表格
-    st.table(summary_df_managed)
+    st.dataframe(summary_df_managed, use_container_width=True)
 
 
     # 10. Managed Wi‑Fi（四類）的 Wi‑Fi Technology 占比圖
@@ -1869,20 +1921,22 @@ def page_dashboard():
     
         tech_vendor_rows.append({
             "Wi‑Fi Technology": tech,
-            "Huawei": int(vc["Huawei"]),
-            "Ruckus": int(vc["Ruckus"]),
-            "Total": int(vc.sum())
+            "Site Count": int(sub["Site Code"].nunique()),
+            "Huawei AP": int(vc["Huawei"]),
+            "Ruckus AP": int(vc["Ruckus"]),
+            "AP Count": int(vc.sum())
         })
     
     df_tech_vendor = pd.DataFrame(tech_vendor_rows)
-
-    # ✅ 新增 Total 行（所有 Wi‑Fi Technology 合計）
+    
+    # ✅ Total 行
     if not df_tech_vendor.empty:
         total_row_vendor_wifi = {
             "Wi‑Fi Technology": "Total",
-            "Huawei": int(df_tech_vendor["Huawei"].sum()),
-            "Ruckus": int(df_tech_vendor["Ruckus"].sum()),
-            "Total": int(df_tech_vendor["Total"].sum()),
+            "Site Count": int(combined_df["Site Code"].nunique()),
+            "Huawei AP": int(df_tech_vendor["Huawei AP"].sum()),
+            "Ruckus AP": int(df_tech_vendor["Ruckus AP"].sum()),
+            "AP Count": int(df_tech_vendor["AP Count"].sum()),
         }
     
         df_tech_vendor = pd.concat(
@@ -1890,10 +1944,15 @@ def page_dashboard():
             ignore_index=True
         )
     
+    # ✅ 排序欄位
+    df_tech_vendor = df_tech_vendor[
+        ["Wi‑Fi Technology", "Site Count", "Huawei AP", "Ruckus AP", "AP Count"]
+    ]
+    
     if df_tech_vendor.empty:
         st.info("目前六類 AP 中沒有 Wi‑Fi Technology 的品牌分佈資料。")
     else:
-        st.table(df_tech_vendor)
+        st.dataframe(df_tech_vendor, use_container_width=True)
 
     # ---------------------------------------------------------
     # 10.2 本月總 AP（六類）的 Vendor（表 + 餅圖）
@@ -1914,9 +1973,20 @@ def page_dashboard():
         .reset_index(name="Count")
     )
     
+    # ✅ Site Count
+    vendor_site_counts = (
+        combined_df
+        .groupby("Vendor")["Site Code"]
+        .nunique()
+    )
+    
+    total_vendor_df["Site Count"] = total_vendor_df["Vendor"].map(vendor_site_counts).fillna(0).astype(int)
+    
+    # ✅ Percent(AP)
     _total = int(total_vendor_df["Count"].sum())
+    
     if _total > 0:
-        total_vendor_df["Percent"] = (
+        total_vendor_df["Percent(AP)"] = (
             (total_vendor_df["Count"] / _total * 100)
             .round(0)
             .astype(int)
@@ -1924,13 +1994,19 @@ def page_dashboard():
             + "%"
         )
     else:
-        total_vendor_df["Percent"] = "0%"
+        total_vendor_df["Percent(AP)"] = "0%"
     
-    # ✅ 新增 Total 行（Vendor）
+    # ✅ rename（核心）
+    total_vendor_df = total_vendor_df.rename(columns={
+        "Count": "AP Count"
+    })
+    
+    # ✅ Total 行
     total_row_vendor = pd.DataFrame([{
         "Vendor": "Total",
-        "Count": int(total_vendor_df["Count"].sum()),
-        "Percent": "100%" if _total > 0 else "0%"
+        "Site Count": int(combined_df["Site Code"].nunique()),
+        "AP Count": int(total_vendor_df["AP Count"].sum()),
+        "Percent(AP)": "100%" if _total > 0 else "0%"
     }])
     
     total_vendor_df = pd.concat(
@@ -1938,8 +2014,10 @@ def page_dashboard():
         ignore_index=True
     )
     
-    st.table(
-        total_vendor_df[["Vendor", "Count", "Percent"]]
+    # ✅ 顯示
+    st.dataframe(
+        total_vendor_df[["Vendor", "Site Count", "AP Count", "Percent(AP)"]],
+        use_container_width=True
     )
 
     st.markdown("")
@@ -1961,7 +2039,7 @@ def page_dashboard():
 
     _vendor_pie_df = compute_pie_integer_percent(
         total_vendor_df_pie,
-        value_col="Count",
+        value_col="AP Count",
         out_col="PercentInt"
     )
     
@@ -1970,7 +2048,7 @@ def page_dashboard():
     fig_vendor_pie = make_square_pie_12cm_overall(
         df=total_vendor_df_pie,
         names="Vendor",
-        values="Count",
+        values="AP Count",
         title_text="Brand Distribution of APs",
         color_col="Vendor",
         color_discrete_map=COLOR_MAP,
@@ -2005,9 +2083,20 @@ def page_dashboard():
         .reset_index(name="Count")
     )
     
+    # ✅ Site Count
+    vendor_site_counts_mgd = (
+        managed_df
+        .groupby("Vendor")["Site Code"]
+        .nunique()
+    )
+    
+    df_vendor_mgd["Site Count"] = df_vendor_mgd["Vendor"].map(vendor_site_counts_mgd).fillna(0).astype(int)
+    
+    # ✅ Percent(AP)
     _total_mgd = int(df_vendor_mgd["Count"].sum())
+    
     if _total_mgd > 0:
-        df_vendor_mgd["Percent"] = (
+        df_vendor_mgd["Percent(AP)"] = (
             (df_vendor_mgd["Count"] / _total_mgd * 100)
             .round(0)
             .astype(int)
@@ -2015,13 +2104,19 @@ def page_dashboard():
             + "%"
         )
     else:
-        df_vendor_mgd["Percent"] = "0%"
-
-    # ✅ 新增 Total 行（Managed Wi‑Fi Vendor）
+        df_vendor_mgd["Percent(AP)"] = "0%"
+    
+    # ✅ rename（核心）
+    df_vendor_mgd = df_vendor_mgd.rename(columns={
+        "Count": "AP Count"
+    })
+    
+    # ✅ Total 行
     total_row_vendor_mgd = pd.DataFrame([{
         "Vendor": "Total",
-        "Count": int(df_vendor_mgd["Count"].sum()),
-        "Percent": "100%" if _total_mgd > 0 else "0%"
+        "Site Count": int(managed_df["Site Code"].nunique()),
+        "AP Count": int(df_vendor_mgd["AP Count"].sum()),
+        "Percent(AP)": "100%" if _total_mgd > 0 else "0%"
     }])
     
     df_vendor_mgd = pd.concat(
@@ -2029,8 +2124,15 @@ def page_dashboard():
         ignore_index=True
     )
     
-    st.table(
-        df_vendor_mgd[["Vendor", "Count", "Percent"]]
+    # ✅ 固定欄位順序
+    df_vendor_mgd = df_vendor_mgd[
+        ["Vendor", "Site Count", "AP Count", "Percent(AP)"]
+    ]
+    
+    # ✅ 顯示
+    st.dataframe(
+        df_vendor_mgd,
+        use_container_width=True
     )
     
     # 2️⃣ Vendor 餅圖（Managed）
@@ -2042,7 +2144,7 @@ def page_dashboard():
 
     _mgd_vendor_pie_df = compute_pie_integer_percent(
         df_vendor_mgd_pie,
-        value_col="Count",
+        value_col="AP Count",
         out_col="PercentInt"
     )
     
@@ -2051,7 +2153,7 @@ def page_dashboard():
     fig_vendor_mgd = make_square_pie_12cm_managed(
         df=df_vendor_mgd_pie,
         names="Vendor",
-        values="Count",
+        values="AP Count",
         title_text="Brand Distribution of APs<br>for Managed Wi‑Fi",
         color_col="Vendor",
         color_discrete_map=COLOR_MAP,
