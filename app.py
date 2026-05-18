@@ -2573,6 +2573,20 @@ def page_hotspot_query():
     m2.metric("查詢到的 AP 數", total_aps)
 
     # =========================
+    # WiFi Technology 統計
+    # =========================
+    if "Wifi Technology (norm)" in res_df.columns:
+        tech_summary = (
+            res_df["Wifi Technology (norm)"]
+            .value_counts()
+            .reset_index()
+        )
+        tech_summary.columns = ["WiFi Technology", "AP Count"]
+    
+        st.subheader("📶 WiFi Technology 分佈（AP 數）")
+        st.dataframe(tech_summary, use_container_width=True)
+    
+    # =========================
     # 4️⃣ Site 統計
     # =========================
     cat_by_site = (
@@ -2580,23 +2594,46 @@ def page_hotspot_query():
         .first()
         .to_dict()
     )
-
-    st.subheader("📍 Site 統計")
-
-    site_summary = (
+    
+    st.subheader("📍 Site 統計（含 WiFi 技術）")
+    
+    site_tech = (
         res_df
-        .groupby(["Site Code", "Hotspot Name (Chinese)"])
+        .groupby([
+            "Site Code",
+            "Hotspot Name (Chinese)",
+            "Wifi Technology (norm)"
+        ])
         .size()
         .reset_index(name="AP Count")
     )
+    
 
-    site_summary["Category"] = site_summary["Site Code"].map(cat_by_site)
+    site_pivot = site_tech.pivot_table(
+        index=["Site Code", "Hotspot Name (Chinese)"],
+        columns="Wifi Technology (norm)",
+        values="AP Count",
+        fill_value=0
+    ).reset_index()
+    
 
-    site_summary = site_summary[
-        ["Site Code", "Hotspot Name (Chinese)", "Category", "AP Count"]
+    site_pivot["Category"] = site_pivot["Site Code"].map(cat_by_site)
+
+
+    wifi_cols = [
+        c for c in site_pivot.columns
+        if c not in ["Site Code", "Hotspot Name (Chinese)", "Category"]
+        and not c.startswith("Total")
     ]
 
-    st.dataframe(site_summary, use_container_width=True)
+    
+    site_pivot["Total AP"] = site_pivot[wifi_cols].sum(axis=1)
+    
+    site_pivot = site_pivot[
+        ["Site Code", "Hotspot Name (Chinese)", "Category", "Total AP"] + wifi_cols
+    ]
+    
+    st.dataframe(site_pivot, use_container_width=True)
 
     # =========================
     # 5️⃣ AP 明細（含 AP Model）
@@ -2632,3 +2669,4 @@ if page == "📊 WiFi AP 統計面板":
     page_dashboard()
 else:
     page_hotspot_query()
+
