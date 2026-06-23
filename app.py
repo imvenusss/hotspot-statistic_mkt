@@ -1,4 +1,4 @@
-#原版本 + Hotspot Statistic 
+#原版本 + Hotspot Statistic + 修改service type
 # -*- coding: utf-8 -*-
 import io
 import re
@@ -12,16 +12,13 @@ import streamlit as st
 # 常數與分類規則
 # =========================
 CTM_WIFI_TYPES = [
-    'CTM WiFi', 'CTM Internal', 'CTM Wifi (strategic - Convenience Store)',
-    'Partnership Wifi', 'Partnership wifi', 'CTM WiFi (ifood)',
-    'CTM Wifi (strategic - Chain Supermarket)', 'Free Hotspots',
-    'CTM Wifi', 'CTM Wifi ', 'FreeWiFi.MO by CTM', 'CTM WiFi (Ports)',
-    'Wifi Street', 'SOC_TEST', 'CTM WiFi (Partnership)'
+    'CTM Wi-Fi', 'CTM Wi-Fi - FreeWiFi.MO by CTM', 'CTM Wi-Fi - Ports',
+    'CTM Wi-Fi - Partnership', 'CTM Wi-Fi (Internal)'
 ]
-MANAGED_WIFI_TYPES = ['Managed Wi-Fi', 'FreeWiFi.MO by CityU', ' FreeWiFi.MO by IAM']
-BUS_WIFI_TYPES = ['Bus Wifi']
-FERRY_WIFI_TYPES = ['Ferry Wifi']
-LIMO_WIFI_TYPES = ['Limo / Shuttle Wi-Fi']
+MANAGED_WIFI_TYPES = ['Managed Wi-Fi']
+BUS_WIFI_TYPES = ['CTM Wi-Fi (Transportation) - Public Bus']
+FERRY_WIFI_TYPES = ['Managed Wi-Fi (Transportation) - Ferry']
+LIMO_WIFI_TYPES = ['Managed Wi-Fi (Transportation) - Limo / Shuttle']
 
 CATEGORY_ORDER = ["CTM WiFi", "Managed WiFi", "Mixed Site", "Bus WiFi", "Ferry WiFi", "Limo WiFi"]
 CATEGORY_SET = set(CATEGORY_ORDER)
@@ -180,15 +177,40 @@ def _is_special_site(site_val) -> bool:
         return False
 # === 新增結束 ===
 
+def normalize_servicetype(s):
+    s = _safe_strip(s).lower()
+
+    # ✅ 一次性消除所有奇怪 dash / 符號
+    s = re.sub(r"[‐‑‒–—−]", "-", s)
+
+    # ✅ 移除多餘空白
+    s = re.sub(r"\s+", " ", s)
+
+    return s
+
+
 def assign_category_row(service_type, ssid1):
-    # === 修補（最小改動）：避免 ssid1 為 float/NaN 觸發 strip 錯誤 ===
-    s = _safe_upper(ssid1)  # 原：(ssid1 or "").strip().upper()
-    if service_type in MANAGED_WIFI_TYPES:
-        return "Mixed Site" if s == "CTM-WIFI" else "Managed WiFi"
-    if service_type in CTM_WIFI_TYPES: return "CTM WiFi"
-    if service_type in BUS_WIFI_TYPES: return "Bus WiFi"
-    if service_type in FERRY_WIFI_TYPES: return "Ferry WiFi"
-    if service_type in LIMO_WIFI_TYPES: return "Limo WiFi"
+    stype = normalize_servicetype(service_type)
+    ssid = _safe_upper(ssid1)
+
+    # ✅ Transportation 類（優先）
+    if "bus" in stype:
+        return "Bus WiFi"
+
+    if "ferry" in stype:
+        return "Ferry WiFi"
+
+    if "limo" in stype or "shuttle" in stype:
+        return "Limo WiFi"
+
+    # ✅ Managed（含 Mixed）
+    if "managed" in stype:
+        return "Mixed Site" if ssid == "CTM-WIFI" else "Managed WiFi"
+
+    # ✅ CTM（任何 CTM Wi-Fi）
+    if "ctm" in stype:
+        return "CTM WiFi"
+
     return "Other"
 
 def read_upload(uploaded):
@@ -223,7 +245,7 @@ def prepare_df(df: pd.DataFrame, allow_missing_wifi_vendor: bool = False):
     d["Hotspot Name (Chinese)"] = d[col_hotspot_cn].astype(str).fillna("").str.strip() if col_hotspot_cn else ""
     d6 = d[d["Category"].isin(CATEGORY_SET)].copy()
     return d, d6
-
+    
 def count_wifi_tech_series(df, col="Wifi Technology (norm)"):
     vc = df[col].value_counts()
     return vc.reindex(WIFI_LEVELS_DISPLAY, fill_value=0)
